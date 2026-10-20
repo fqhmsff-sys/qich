@@ -34,16 +34,31 @@ def load(data):
         raise ValueError("checksum .qhc tidak cocok (file rusak atau dimodifikasi)")
     try:
         payload = json.loads(body)
+        if (not isinstance(payload, dict)
+                or payload.get("version") != 1
+                or not isinstance(payload.get("modules"), dict)
+                or not isinstance(payload.get("entry"), str)
+                or not isinstance(payload.get("meta", {}), dict)):
+            raise ValueError("struktur .qhc tidak valid / versi tidak didukung")
+        mods = {}
+        for k, m in payload["modules"].items():
+            if not isinstance(k, str) or not isinstance(m, dict):
+                raise ValueError("modul .qhc harus berupa objek")
+            if not isinstance(m.get("file"), str):
+                raise ValueError("nama file modul .qhc tidak valid")
+            if "ast" not in m:
+                raise ValueError("AST modul tidak ada")
+            prog = A.from_dict(m["ast"])
+            if not isinstance(prog, A.Program):
+                raise ValueError("modul bukan Program")
+            pkg = m.get("pkg")
+            if pkg is not None and not isinstance(pkg, str):
+                raise ValueError("paket modul .qhc tidak valid")
+            mods[k] = {"file": m["file"], "pkg": pkg, "program": prog}
+        if payload["entry"] not in mods:
+            raise ValueError("entry tidak ada di bundle")
+        return mods, payload["entry"], payload.get("meta", {})
     except json.JSONDecodeError as e:
-        raise ValueError(f"isi .qhc bukan JSON valid: {e}")
-    if not isinstance(payload, dict) or payload.get("version") != 1 or not isinstance(payload.get("modules"), dict):
-        raise ValueError("struktur .qhc tidak valid / versi tidak didukung")
-    mods = {}
-    for k, m in payload["modules"].items():
-        prog = A.from_dict(m["ast"])
-        if not isinstance(prog, A.Program):
-            raise ValueError("modul bukan Program")
-        mods[k] = {"file": str(m["file"]), "pkg": m.get("pkg"), "program": prog}
-    if payload["entry"] not in mods:
-        raise ValueError("entry tidak ada di bundle")
-    return mods, payload["entry"], payload.get("meta", {})
+        raise ValueError(f"isi .qhc bukan JSON valid: {e}") from e
+    except (KeyError, TypeError, RecursionError) as e:
+        raise ValueError(f"struktur .qhc tidak valid: {e}") from e
