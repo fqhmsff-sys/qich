@@ -1,0 +1,17 @@
+use mod:main
+
+fn test_klik_menambah() {
+    let app = main.build_app()
+    app.start()
+    assert(app.render_text().contains("Hitungan: 0"))
+    assert(app.click("+1"))
+    assert(app.click("+1"))
+    assert(app.render_text().contains("Hitungan: 2"))
+    app.click("reset")
+    assert(app.render_text().contains("Hitungan: 0"))
+}
+
+fn test_html_aman_dari_injeksi() {
+    let app = main.build_app()
+    assert(!app.render_html().contains("<script>"))
+}
