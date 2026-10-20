@@ -1,0 +1,7 @@
+/// Menyapa seseorang.
+fn greet(name: str) -> str rtrn => f"Halo, {name}!"
+
+fn main() {
+    print("Hello Qich")
+    print(greet("dunia"))
+}
