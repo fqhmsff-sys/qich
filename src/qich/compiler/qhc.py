@@ -35,6 +35,7 @@ def load(data):
     try:
         payload = json.loads(body)
         if (not isinstance(payload, dict)
+                or type(payload.get("version")) is not int
                 or payload.get("version") != 1
                 or not isinstance(payload.get("modules"), dict)
                 or not isinstance(payload.get("entry"), str)
