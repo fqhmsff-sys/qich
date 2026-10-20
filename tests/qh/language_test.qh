@@ -1,0 +1,190 @@
+// Test end-to-end fitur bahasa Qich (dijalankan oleh `qh test`).
+
+use std:fs
+use std:json
+use std:os
+
+strct Point {
+    x: int
+    y: int
+    fn sum(self) rtrn => self.x + self.y
+    fn moved(self, dx: int) { rtrn Point(self.x + dx, self.y) }
+}
+
+enm Shape { Circle(r), Rect(w, h), Dot }
+
+fn area(s) rtrn => mtch s {
+    Circle(r) => r * r * 3,
+    Rect(w, h) => w * h,
+    Dot => 0
+}
+
+fn first<T>(xs: list<T>) -> T rtrn => xs[0]
+
+fn same<T>(a: T, b: T) rtrn => a
+
+fn sqrt_int(n: int) -> int requires n >= 0 ensures result >= 0 {
+    let r = 0
+    whl (r + 1) * (r + 1) <= n { r += 1 }
+    rtrn r
+}
+
+fn div(a, b) {
+    if b == 0 { rtrn Err(Error("bagi nol")) }
+    rtrn Ok(a / b)
+}
+
+fn chain(a, b, c) {
+    let x = div(a, b)?
+    let y = div(x, c)?
+    rtrn Ok(y)
+}
+
+async fn slow(n) { rtrn n * 2 }
+
+fn test_variabel_dan_koleksi() {
+    let nama = "Budi"
+    let daftar = [1, 2, 3]
+    let m = {a: 1, "b": 2}
+    daftar.push(4)
+    m["c"] = 3
+    assert_eq(len(daftar), 4)
+    assert_eq(m["c"], 3)
+    assert_eq(daftar[1..3], [2, 3])
+    assert_eq(f"Halo, {nama}!", "Halo, Budi!")
+    assert(2 in daftar)
+    assert(!("z" in m))
+}
+
+fn test_kontrol_alur() {
+    let total = 0
+    for i in 0..5 {
+        if i == 3 { cnt }
+        total += i
+    }
+    assert_eq(total, 7)
+    let n = 0
+    whl true { n += 1
+        if n >= 5 { brk }
+    }
+    assert_eq(n, 5)
+    for k, v in {a: 1} { assert_eq(k, "a"); assert_eq(v, 1) }
+    assert_eq(1 < 2 ? "ya" : "tidak", "ya")
+}
+
+fn test_fungsi_dan_lambda() {
+    let plus = fn(a, b) rtrn => a + b
+    assert_eq(plus(2, 3), 5)
+    assert_eq([1, 2, 3].map(fn(x) rtrn => x * 2), [2, 4, 6])
+    assert_eq([1, 2, 3, 4].filter(fn(x) rtrn => x % 2 == 0), [2, 4])
+    assert_eq([1, 2, 3].reduce(fn(a, b) rtrn => a + b, 0), 6)
+    fn tambah(a, b = 10) rtrn => a + b
+    assert_eq(tambah(1), 11)
+    assert_eq(tambah(1, b: 5), 6)
+}
+
+fn test_closure() {
+    let c = 0
+    let inc = fn() { c += 1; rtrn c }
+    inc(); inc()
+    assert_eq(c, 2)
+}
+
+fn test_tipe_kustom() {
+    let p = Point(1, 2)
+    assert_eq(p.sum(), 3)
+    assert_eq(p.moved(5).x, 6)
+    p.x = 10
+    assert_eq(p.x, 10)
+    assert_eq(Point(1, 2), Point(1, 2))
+}
+
+fn test_anotasi_dicek_saat_ada() {
+    try { Point("a", 2); assert(false, "harus gagal") } catch e { assert(e.msg.contains("int")) }
+}
+
+fn test_generics() {
+    assert_eq(first([5, 6]), 5)
+    assert_eq(first(["a"]), "a")
+    try { same(1, "a"); assert(false, "harus gagal") } catch e { assert(e.kind == "TypeError") }
+}
+
+fn test_kontrak() {
+    assert_eq(sqrt_int(17), 4)
+    try { sqrt_int(-1); assert(false, "harus gagal") } catch e { assert(e.kind == "ContractError") }
+}
+
+fn test_result_dan_propagasi() {
+    assert_eq(chain(8, 2, 2).unwrap(), 2.0)
+    assert(chain(1, 0, 1).is_err())
+    assert_eq(chain(1, 0, 1).err().msg, "bagi nol")
+    assert_eq(div(1, 0).unwrap_or(-1), -1)
+}
+
+fn test_pattern_matching() {
+    assert_eq(area(Circle(2)), 12)
+    assert_eq(area(Rect(2, 5)), 10)
+    assert_eq(area(Dot), 0)
+    let r = mtch [1, 2, 3] { [a, ..rest] => len(rest), _ => -1 }
+    assert_eq(r, 2)
+    let k = mtch 7 { 1..5 => "kecil", 5..=9 => "sedang", _ => "besar" }
+    assert_eq(k, "sedang")
+    let g = mtch 4 { n if n > 3 => "besar", _ => "kecil" }
+    assert_eq(g, "besar")
+    assert_eq(mtch "x" { "a" | "b" => 1, _ => 2 }, 2)
+}
+
+fn test_error_try_catch_throw() {
+    try { throw "oops" } catch e { assert_eq(e, "oops") }
+    try { let x = [1][5] } catch e { assert_eq(e.kind, "IndexError") }
+    try { let y = 1 / 0 } catch e { assert_eq(e.kind, "ArithmeticError") }
+    let f = nil
+    try { f() } catch e { assert_eq(e.kind, "TypeError") }
+}
+
+fn test_async_dan_concurrency() {
+    let t1 = slow(21)
+    let t2 = slow(5)
+    assert_eq(await t1, 42)
+    assert_eq(await_all([t2]), [10])
+    let c = chan()
+    let p = fn() { c.send(1); c.send(2); c.close() }
+    p()
+    assert_eq(c.recv(), 1)
+    assert_eq(c.recv(), 2)
+    assert_eq(c.recv(), nil)
+}
+
+fn test_filesystem_dan_json() {
+    let dir = os.env("TMPDIR", "/tmp")
+    let path = fs.join(dir, "qich_test_fs.json")
+    let data = {nama: "Qich", angka: [1, 2, 3]}
+    fs.write(path, json.stringify(data).unwrap()).unwrap()
+    let back = json.parse(fs.read(path).unwrap()).unwrap()
+    assert_eq(back["angka"], [1, 2, 3])
+    fs.remove(path).unwrap()
+    assert(fs.read(path).is_err())
+    assert(json.parse("{bukan json").is_err())
+}
+
+fn test_bridge_python() {
+    use py:math
+    assert_eq(math.floor(2.7), 2)
+}
+
+fn test_strict_bool_dan_tipe() {
+    try { if 1 { } assert(false) } catch e { assert(e.msg.contains("bool")) }
+    try { let z = "a" + 1; assert(false) } catch e { assert_eq(e.kind, "TypeError") }
+}
+
+fn test_rekursi() {
+    fn fib(n) { if n < 2 { rtrn n } rtrn fib(n - 1) + fib(n - 2) }
+    assert_eq(fib(15), 610)
+    fn depth(n) rtrn => n == 0 ? 0 : 1 + depth(n - 1)
+    assert_eq(depth(300), 300)
+}
+
+fn test_stack_overflow_tertangkap_aman() {
+    fn inf(n) rtrn => inf(n + 1)
+    try { inf(0); assert(false) } catch e { assert_eq(e.kind, "ResourceLimit") }
+}
