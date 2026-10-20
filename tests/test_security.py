@@ -133,6 +133,12 @@ class Security(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     qhc.load(artifact(payload))
 
+    def test_qhc_rejects_non_finite_ast_numbers(self):
+        body = b'{"version":1,"entry":"main","modules":{"main":{"file":"main.qh","ast":{"t":"Program","body":[{"t":"Num","value":NaN}]}}}}'
+        data = qhc.MAGIC + hashlib.sha256(body).hexdigest().encode() + b"\\n" + body
+        with self.assertRaises(ValueError):
+            qhc.load(data)
+
     def test_c_bridge_type_safety(self):
         with self.assertRaises(QE): run('use c:c\nlet f = c.fn("strlen", ["ptr"], "usize")')
         with self.assertRaises(QE): run('use c:c\nlet f = c.fn("strlen", ["str"], "usize")\nf(123)')
