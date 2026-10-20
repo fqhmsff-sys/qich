@@ -47,6 +47,7 @@ Template showcase: `qh new x --template ai|web|app` (lihat `examples/`).
 ## Dokumen
 
 - [docs/STATUS.md](docs/STATUS.md) — **apa yang IMPLEMENTED / TESTED / EXPERIMENTAL / PLANNED / UNAVAILABLE** (baca ini dulu)
+- [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) — pemeriksaan sebelum rilis dan batasan yang masih diketahui
 - [docs/LANGUAGE.md](docs/LANGUAGE.md) — referensi bahasa
 - [docs/DECISIONS.md](docs/DECISIONS.md) — keputusan & resolusi konflik terhadap blueprint
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/STDLIB.md](docs/STDLIB.md), [docs/BRIDGES.md](docs/BRIDGES.md)
