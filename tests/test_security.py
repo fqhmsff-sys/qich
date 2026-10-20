@@ -135,7 +135,7 @@ class Security(unittest.TestCase):
 
     def test_qhc_rejects_non_finite_ast_numbers(self):
         body = b'{"version":1,"entry":"main","modules":{"main":{"file":"main.qh","ast":{"t":"Program","body":[{"t":"Num","value":NaN}]}}}}'
-        data = qhc.MAGIC + hashlib.sha256(body).hexdigest().encode() + b"\\n" + body
+        data = qhc.MAGIC + hashlib.sha256(body).hexdigest().encode() + b"\n" + body
         with self.assertRaises(ValueError):
             qhc.load(data)
 
