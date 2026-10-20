@@ -1,0 +1,9 @@
+[package]
+name = "qich"
+version = "0.2.0"
+entry = "examples/hello/src/main.qh"
+
+[dependencies]
+
+[bridge]
+allow = []
