@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qich"
+version = "0.2.0"
+description = "Qich — Mudah. Aman. Cepat. Induk semua library."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+[project.scripts]
+qh = "qich.cli.main:entry"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+qich = ["bridge/js_helper.js"]
