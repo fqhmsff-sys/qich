@@ -1,6 +1,6 @@
-# Status Qich v0.2.0
+# Status Qich v0.2.1
 
-Legenda: **TESTED** = ada test otomatis yang lulus di lingkungan pengembangan (Linux, Python 3.12, Node 22, g++) ·
+Legenda: **TESTED** = ada test otomatis yang lulus di lingkungan pengembangan (Linux, Python 3.11, Node 22, g++) ·
 **IMPLEMENTED** = kode ada, belum teruji di sini · **EXPERIMENTAL** = ada, terbatas · **PLANNED** = belum ada · **UNAVAILABLE** = tidak bisa di lingkungan ini.
 
 ## Inti bahasa
