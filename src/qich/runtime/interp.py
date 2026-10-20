@@ -11,6 +11,7 @@ from .values import Env, QFn, BoundMethod, StructDef, Instance, EnumDef, EnumVal
     ReturnSig, BreakSig, ContinueSig
 
 MAX_ALLOC = 50_000_000
+_MISSING = object()
 
 
 class QichThrow(Exception):
@@ -319,9 +320,9 @@ class Interp:
         name = n.name
         e = env
         while e is not None:
-            v = e.vars
-            if name in v:
-                return v[name]
+            value = e.vars.get(name, _MISSING)
+            if value is not _MISSING:
+                return value
             e = e.parent
         names = []
         e = env
