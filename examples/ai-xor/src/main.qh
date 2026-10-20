@@ -1,0 +1,21 @@
+use qy:model
+
+/// Melatih jaringan kecil untuk fungsi XOR.
+fn train() {
+    let m = Model.sequential([Dense(2, 4, "tanh"), Dense(4, 1, "sigmoid")], 1)
+    let xs = [[0, 0], [0, 1], [1, 0], [1, 1]]
+    let ys = [[0], [1], [1], [0]]
+    m.fit(xs, ys, 3000, 0.5)
+    rtrn m
+}
+
+fn main() {
+    let m = train()
+    for x in [[0, 0], [0, 1], [1, 0], [1, 1]] {
+        let y = m.run(x).unwrap()
+        print(f"XOR({x[0]}, {x[1]}) = {round(y[0], 2)}")
+    }
+    m.save("xor-model.json").unwrap()
+    let loaded = Model.load("xor-model.json").unwrap()
+    print("model dimuat ulang:", loaded.run([1, 0]).unwrap()[0] > 0.9)
+}
