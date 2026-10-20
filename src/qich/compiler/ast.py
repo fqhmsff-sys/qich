@@ -1,5 +1,6 @@
 """AST Qich + serialisasi/verifikasi untuk artifact .qhc."""
 from dataclasses import dataclass, fields
+import math
 
 NODES = {}
 
@@ -161,6 +162,10 @@ def from_dict(d, depth=0):
             raise ValueError(str(e))
     if isinstance(d, list):
         return [from_dict(x, depth + 1) for x in d]
-    if d is None or isinstance(d, (str, int, float, bool)):
+    if isinstance(d, float):
+        if not math.isfinite(d):
+            raise ValueError("angka AST harus finite")
+        return d
+    if d is None or isinstance(d, (str, int, bool)):
         return d
     raise ValueError("nilai tidak valid")
