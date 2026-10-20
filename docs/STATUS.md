@@ -18,7 +18,7 @@ Legenda: **TESTED** = ada test otomatis yang lulus di lingkungan pengembangan (L
 
 ## Toolchain
 `qh new/run/build/test/add/remove/check/fmt/update/doc/clean/bundle/publish/audit/bridges/repl` — TESTED (end-to-end via subprocess).
-Instalasi `install.sh` — TESTED (prefix sementara). `pip install .` — IMPLEMENTED (belum dijalankan).
+Instalasi `install.sh` — TESTED (prefix sementara). `pip install .` — TESTED (CI install-smoke).
 
 ## Library standar & Qichy
 | Modul | Status |
