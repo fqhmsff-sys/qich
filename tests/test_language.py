@@ -61,6 +61,11 @@ for item in daftar { print(item) }''')
         with self.assertRaises(ValueError): A.from_dict({"t": "Num", "value": 1, "extra": 2})
         with self.assertRaises(ValueError): A.from_dict({"t": "Str", "value": 5})
 
+    def test_iterating_maps_strings_and_bytes(self):
+        src = 'let m = {"a": 1, "b": 2}\nfor k, v in m { print(k, v) }\nfor c in "ab" { print(c) }\nfor b in bytes([65, 66]) { print(b) }'
+        out = run(src)
+        self.assertEqual(out, "a 1\nb 2\na\nb\n65\n66\n")
+
     def test_task_errors_propagate(self):
         out = run('async fn f() { rtrn [1][9] }\ntry { await f() } catch e { print(e.kind) }')
         self.assertEqual(out.strip(), "IndexError")
