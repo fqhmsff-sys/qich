@@ -116,10 +116,12 @@ class Security(unittest.TestCase):
     def test_qhc_rejects_malformed_structures(self):
         def artifact(payload):
             body = json.dumps(payload, separators=(",", ":"), allow_nan=False).encode()
-            return qhc.MAGIC + hashlib.sha256(body).hexdigest().encode() + b"\\n" + body
+            return qhc.MAGIC + hashlib.sha256(body).hexdigest().encode() + b"\n" + body
 
         bad_payloads = [
             [],
+            {"version": True, "entry": "main", "modules": {"main": {"file": "main.qh", "ast": {"t": "Program", "body": []}}}},
+            {"version": 1, "entry": "main", "modules": {"main": {"file": "main.qh", "ast": {"t": "Program", "body": "bukan-list"}}}},
             {"version": 1, "entry": "main", "modules": []},
             {"version": 1, "entry": [], "modules": {}},
             {"version": 1, "entry": "main", "modules": {"main": None}},
