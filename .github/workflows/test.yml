@@ -1,0 +1,46 @@
+name: Qich Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [test_language.py, test_bridge.py, test_packages.py, test_security.py, test_chyb_cli.py]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run ${{ matrix.suite }}
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p '${{ matrix.suite }}'
+
+  qich-language-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run Qich .qh tests
+        env:
+          PYTHONPATH: src
+        run: python -m qich test
