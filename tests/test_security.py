@@ -1,6 +1,7 @@
-import io, json, os, random, sys, tempfile, unittest, zipfile
+import io, json, os, random, sys, tempfile, unittest, zipfile, hashlib
 from helpers import run, parse, QichError, Policy, ROOT
 from qich.security import safe_extract_zip
+from qich.compiler import qhc
 from qich.runtime.interp import Interp
 from qich.compiler.diagnostics import QichError as QE
 
@@ -97,6 +98,24 @@ class Security(unittest.TestCase):
             self.assertEqual(tryload({"format": "qy-model", "version": 1, "layers": [{"in": 10**9, "out": 10**9, "act": "linear", "w": [], "b": []}]}), "true")
             self.assertEqual(tryload({"format": "qy-model", "version": 1, "layers": [{"in": 1, "out": 1, "act": "__import__('os')", "w": [[1]], "b": [0]}]}), "true")
             self.assertEqual(tryload("\x80\x04pickle bytes", True), "true")
+
+    def test_qhc_rejects_malformed_structures(self):
+        def artifact(payload):
+            body = json.dumps(payload, separators=(",", ":"), allow_nan=False).encode()
+            return qhc.MAGIC + hashlib.sha256(body).hexdigest().encode() + b"\\n" + body
+
+        bad_payloads = [
+            [],
+            {"version": 1, "entry": "main", "modules": []},
+            {"version": 1, "entry": [], "modules": {}},
+            {"version": 1, "entry": "main", "modules": {"main": None}},
+            {"version": 1, "entry": "main", "modules": {"main": {"file": "main.qh"}}},
+            {"version": 1, "entry": "main", "meta": [], "modules": {}},
+        ]
+        for payload in bad_payloads:
+            with self.subTest(payload=payload):
+                with self.assertRaises(ValueError):
+                    qhc.load(artifact(payload))
 
     def test_c_bridge_type_safety(self):
         with self.assertRaises(QE): run('use c:c\nlet f = c.fn("strlen", ["ptr"], "usize")')
