@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Qich geometric three-core mark on transparent background">
+  <title>qich — The Three Core</title>
+  <g transform="translate(0 2)">
+    <path d="M256 62 385 136 385 278 331 309 331 167 256 124 204 154 204 91Z" fill="#E63946"/>
+    <path d="M385 278 256 352 204 322 256 292 331 249 331 167 385 136Z" fill="#C92D3A"/>
+    <path d="M204 91 204 154 129 197 129 282 181 312 181 375 75 314 75 166Z" fill="#F04452"/>
+    <path d="M181 375 181 312 256 269 256 207 310 238 310 300 256 331 256 414Z" fill="#C92D3A"/>
+    <path d="M256 62 310 93 256 124 204 154 204 91Z" fill="#F04452"/>
+    <path d="M256 352 310 321 310 383 256 414 181 375 181 312Z" fill="#E63946"/>
+    <path d="M256 124 310 155 310 217 256 186 204 216 204 278 256 309 256 352 181 309 150 291 150 197 256 136Z" fill="#FFFFFF"/>
+    <path d="M256 186 310 217 310 279 256 310 256 269 256 248 236 236Z" fill="#C92D3A"/>
+  </g>
+</svg>
