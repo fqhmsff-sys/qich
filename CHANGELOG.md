@@ -2,6 +2,12 @@
 
 Perubahan penting untuk pengguna Qich dicatat di sini.
 
+## 0.2.1 — 2026-10-20
+
+- Optimalkan lookup variabel runtime untuk menghindari dua pencarian dictionary pada binding yang ditemukan.
+- Tambahkan tes untuk nilai `nil` dan shadowing variabel.
+- Jalankan benchmark interpreter sebagai smoke test CI.
+
 ## Unreleased
 
 - Perketat validasi versi artifact `.qhc` agar boolean tidak diterima sebagai versi integer.
