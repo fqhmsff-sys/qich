@@ -50,9 +50,18 @@ def safe_extract_zip(data: bytes, dest: str, max_files=2000, max_total=100 * 102
     os.makedirs(base, exist_ok=True)
     for zi in infos:
         target = os.path.join(base, zi.filename)
+        # Re-check during extraction: an existing symlink inside dest could
+        # redirect writes outside the destination after the initial validation.
+        resolved = os.path.realpath(target)
+        if not (resolved == base or resolved.startswith(base + os.sep)):
+            raise ValueError(f"path keluar dari tujuan: {zi.filename!r}")
         if zi.is_dir():
             os.makedirs(target, exist_ok=True)
         else:
             os.makedirs(os.path.dirname(target), exist_ok=True)
+            # Parent directories may themselves be symlinks.
+            resolved = os.path.realpath(target)
+            if not (resolved == base or resolved.startswith(base + os.sep)):
+                raise ValueError(f"path keluar dari tujuan: {zi.filename!r}")
             with open(target, "wb") as f:
                 f.write(zf.read(zi))
