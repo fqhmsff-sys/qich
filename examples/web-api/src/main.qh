@@ -1,0 +1,18 @@
+use chyb:server
+
+/// Membangun aplikasi web (dipisah dari main agar mudah dites).
+fn build_app() {
+    let app = Server()
+    app.get("/", fn(req) rtrn => {message: "Halo dari chyb"})
+    app.get("/hello/:name", fn(req) rtrn => Response.text("Halo, " + req.params["name"] + "!"))
+    app.post("/sum", fn(req) {
+        let d = req.json()?
+        rtrn {total: d["a"] + d["b"]}
+    })
+    rtrn app
+}
+
+fn main(args) {
+    let app = build_app()
+    app.listen(8080)
+}
