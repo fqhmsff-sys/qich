@@ -66,6 +66,10 @@ for item in daftar { print(item) }''')
         out = run(src)
         self.assertEqual(out, "a 1\nb 2\na\nb\n65\n66\n")
 
+    def test_identifier_lookup_preserves_nil_and_shadowing(self):
+        out = run('let x = nil\nprint(x == nil)\nfn f() { let x = 2\nprint(x) }\nf()\nprint(x == nil)')
+        self.assertEqual(out, "true\n2\ntrue\n")
+
     def test_task_errors_propagate(self):
         out = run('async fn f() { rtrn [1][9] }\ntry { await f() } catch e { print(e.kind) }')
         self.assertEqual(out.strip(), "IndexError")
