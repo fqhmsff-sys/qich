@@ -202,16 +202,15 @@ class Interp:
     def iterate(self, v):
         t = type(v)
         if t is list or t is RangeVal: return v
-        if t is str: return list(v)
-        if t is dict: return list(v.keys())
-        if t is bytes: return list(v)
+        # Iterasi langsung menghindari salinan O(n) tambahan untuk koleksi besar.
+        if t is str or t is dict or t is bytes: return iter(v)
         if hasattr(v, "__qh_iter__"): return v.__qh_iter__()
         raise rt_err(f"{type_name(v)} tidak bisa diiterasi", "TypeError", "R0204")
 
     def ex_For(self, n, env):
         src = self.ev(n.iter, env)
         if type(src) is dict and len(n.vars) == 2:
-            items = [[k, x] for k, x in src.items()]
+            items = src.items()
         else:
             items = self.iterate(src)
         for x in items:
@@ -219,7 +218,7 @@ class Interp:
             if len(n.vars) == 1:
                 e.vars[n.vars[0]] = x
             else:
-                if type(x) is not list or len(x) != len(n.vars):
+                if type(x) not in (list, tuple) or len(x) != len(n.vars):
                     raise rt_err(f"tidak bisa memecah {to_repr(x)} menjadi {len(n.vars)} variabel", "TypeError", "R0205")
                 for nm, val in zip(n.vars, x):
                     e.vars[nm] = val
