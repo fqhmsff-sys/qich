@@ -1,0 +1,21 @@
+use mod:main
+use chyb:client
+
+fn test_endpoint_json() {
+    let h = main.build_app().start(0)
+    let r = get("http://127.0.0.1:" + str(h.port) + "/").unwrap()
+    h.stop()
+    assert_eq(r.status, 200)
+    assert_eq(r.json().unwrap()["message"], "Halo dari chyb")
+}
+
+fn test_post_dan_404_dan_header_keamanan() {
+    let h = main.build_app().start(0)
+    let base = "http://127.0.0.1:" + str(h.port)
+    let ok = post(base + "/sum", {a: 2, b: 3}).unwrap()
+    let nf = get(base + "/tidak-ada").unwrap()
+    h.stop()
+    assert_eq(ok.json().unwrap()["total"], 5)
+    assert_eq(nf.status, 404)
+    assert_eq(ok.headers["x-content-type-options"], "nosniff")
+}
