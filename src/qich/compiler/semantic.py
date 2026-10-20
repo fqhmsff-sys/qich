@@ -1,5 +1,6 @@
 """Analisis semantik: scope, arity, tipe literal, exhaustiveness sederhana."""
 import difflib
+from functools import lru_cache
 from . import ast as A
 from .diagnostics import QichError, Warn
 
@@ -313,11 +314,17 @@ class Checker:
             for a in p.alts: self.pat(a)
 
 
+@lru_cache(maxsize=1)
+def _default_builtins():
+    # Membuat Interp memasang semua builtin cukup sekali per proses.
+    from ..runtime.interp import Interp
+    import io
+    return tuple(Interp(out=io.StringIO()).builtins.vars)
+
+
 def check_program(prog, file="<src>", builtins=None, exports_of=None):
     if builtins is None:
-        from ..runtime.interp import Interp
-        import io
-        builtins = list(Interp(out=io.StringIO()).builtins.vars)
+        builtins = _default_builtins()
     if exports_of is None:
         from ..runtime import stdlib
         exports_of = stdlib.exports_of
