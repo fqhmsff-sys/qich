@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#10111b">
+<title>Qich Calc — Calculator</title>
+<style>
+:root{color-scheme:dark;--bg:#0b0c13;--panel:#121420;--panel2:#191b2b;--line:rgba(255,255,255,.075);--text:#f7f7ff;--muted:#8589a3;--accent:#8b7cff;--accent2:#5c9dff;--green:#b7ffcf;--shadow:0 28px 80px rgba(0,0,0,.38)}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 50% -10%,rgba(109,94,252,.2),transparent 38%),var(--bg);color:var(--text);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;place-items:center;padding:28px}
+button{font:inherit;border:0;color:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}button:focus-visible{outline:2px solid var(--accent2);outline-offset:3px}.app{width:min(100%,940px);display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:18px}.calculator,.history{background:linear-gradient(145deg,rgba(24,26,43,.97),rgba(15,16,27,.98));border:1px solid var(--line);border-radius:28px;box-shadow:var(--shadow)}.calculator{padding:24px}.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:32px}.brand{display:flex;align-items:center;gap:12px}.logo{width:42px;height:42px;border-radius:14px;background:linear-gradient(135deg,#9b8bff,#596cff);display:grid;place-items:center;font-size:23px;font-weight:800;box-shadow:0 8px 22px #7665ff45}.brand-name{font-weight:750;letter-spacing:-.4px}.brand-sub{font-size:11px;color:var(--muted);letter-spacing:1.8px;text-transform:uppercase}.mode{font-size:12px;color:#b6b2ff;background:#8b7cff16;border:1px solid #8b7cff38;padding:7px 11px;border-radius:99px}.display{min-height:154px;padding:8px 5px 22px;display:flex;flex-direction:column;justify-content:flex-end;text-align:right;overflow:hidden}.expression{min-height:27px;color:var(--muted);font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.result{font-size:clamp(42px,7vw,62px);font-weight:650;letter-spacing:-2.5px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.result.small{font-size:clamp(28px,5vw,42px)}.keypad{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:11px}.key{min-height:65px;border-radius:18px;background:var(--panel2);font-size:21px;font-weight:550;transition:transform .12s,background .15s,filter .15s;box-shadow:inset 0 1px 0 rgba(255,255,255,.025)}.key:hover{background:#22253a}.key:active{transform:scale(.96);filter:brightness(1.2)}.key.utility{color:#c3c5d8;background:#222436}.key.operator{color:#bdb5ff;background:#8b7cff18;border:1px solid #8b7cff24;font-size:23px}.key.equals{background:linear-gradient(135deg,#9b8bff,#6877ff);color:white;box-shadow:0 8px 22px #7665ff38;font-size:24px}.key.zero{grid-column:span 2}.foot{display:flex;justify-content:space-between;gap:12px;color:#6e728d;font-size:11px;padding:19px 4px 0}.history{padding:22px;display:flex;flex-direction:column;min-height:100%}.history-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}.history-title{font-weight:700;font-size:16px}.clear{background:transparent;color:var(--muted);font-size:12px;padding:6px}.clear:hover{color:#fff}.history-list{display:flex;flex-direction:column;gap:8px;overflow:auto;max-height:440px}.empty{color:var(--muted);font-size:13px;text-align:center;padding:42px 8px}.history-item{width:100%;text-align:right;padding:12px 13px;background:#ffffff05;border:1px solid var(--line);border-radius:13px}.history-item:hover{background:#ffffff0b}.history-expr{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.history-result{font-size:19px;font-weight:600;margin-top:3px}.history-note{margin-top:auto;padding-top:18px;color:#696d86;font-size:11px;line-height:1.7}.toast{position:fixed;bottom:22px;left:50%;transform:translate(-50%,20px);opacity:0;pointer-events:none;background:#272a3d;border:1px solid var(--line);border-radius:12px;padding:10px 15px;font-size:13px;transition:.2s}.toast.show{opacity:1;transform:translate(-50%,0)}@media(max-width:720px){body{padding:14px;align-items:start}.app{grid-template-columns:1fr;max-width:460px;gap:14px}.calculator{padding:18px;border-radius:24px}.topbar{margin-bottom:19px}.display{min-height:137px}.keypad{gap:9px}.key{min-height:61px;border-radius:16px}.history{min-height:190px;padding:18px}.history-list{max-height:210px}.history-note{display:none}}@media(max-width:360px){.key{min-height:55px}.calculator{padding:14px}.keypad{gap:7px}}
+</style>
+</head>
+<body>
+<main class="app" aria-label="Kalkulator Qich">
+<section class="calculator">
+  <header class="topbar">
+    <div class="brand"><div class="logo" aria-hidden="true">q</div><div><div class="brand-name">Qich Calc</div><div class="brand-sub">Simple. Clear. Precise.</div></div></div>
+    <span class="mode">STANDARD</span>
+  </header>
+  <div class="display" aria-live="polite">
+    <div class="expression" id="expression">Siap menghitung</div>
+    <div class="result" id="result">0</div>
+  </div>
+  <div class="keypad" id="keypad">
+    <button class="key utility" data-action="clear" aria-label="Hapus semua">AC</button>
+    <button class="key utility" data-action="sign" aria-label="Ubah tanda">+/−</button>
+    <button class="key utility" data-action="percent" aria-label="Persen">%</button>
+    <button class="key operator" data-op="÷" aria-label="Bagi">÷</button>
+    <button class="key" data-digit="7">7</button><button class="key" data-digit="8">8</button><button class="key" data-digit="9">9</button><button class="key operator" data-op="×">×</button>
+    <button class="key" data-digit="4">4</button><button class="key" data-digit="5">5</button><button class="key" data-digit="6">6</button><button class="key operator" data-op="−">−</button>
+    <button class="key" data-digit="1">1</button><button class="key" data-digit="2">2</button><button class="key" data-digit="3">3</button><button class="key operator" data-op="+">+</button>
+    <button class="key zero" data-digit="0">0</button><button class="key" data-action="decimal">.</button><button class="key equals" data-action="equals" aria-label="Hasil">=</button>
+  </div>
+  <footer class="foot"><span>Qich · Calculator</span><span>Keyboard supported ↵</span></footer>
+</section>
+<aside class="history">
+  <div class="history-head"><div class="history-title">Riwayat</div><button class="clear" id="clearHistory">Hapus</button></div>
+  <div class="history-list" id="historyList"><div class="empty">Perhitungan kamu akan muncul di sini.</div></div>
+  <div class="history-note">Klik hasil sebelumnya untuk menggunakannya lagi. Riwayat tersimpan di perangkat ini.</div>
+</aside>
+</main>
+<div class="toast" id="toast" role="status"></div>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const resultEl = $('result'), expressionEl = $('expression'), historyEl = $('historyList'), keypad = $('keypad');
+  let current = '0', previous = null, operator = null, fresh = false, expression = '';
+  let history = [];
+  try { history = JSON.parse(localStorage.getItem('qich-calc-history') || '[]').slice(0,20); } catch {}
+  const fmt = value => {
+    if (!Number.isFinite(value)) return 'Error';
+    if (Object.is(value, -0)) value = 0;
+    const rounded = Number(value.toPrecision(12));
+    return rounded.toLocaleString('id-ID', {maximumFractionDigits:10});
+  };
+  const raw = value => String(Number(value));
+  function render(){ resultEl.textContent = fmt(Number(current)); resultEl.classList.toggle('small', resultEl.textContent.length > 11); expressionEl.textContent = expression || (operator && previous !== null ? fmt(previous) + ' ' + operator : 'Siap menghitung'); }
+  function toast(message){const el=$('toast');el.textContent=message;el.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('show'),1800);}
+  function digit(d){if(current==='Error'||fresh){current=d;fresh=false;}else if(current==='0'){current=d;}else if(current.replace(/[^0-9]/g,'').length<14){current+=d;}render();}
+  function decimal(){if(current==='Error'||fresh){current='0.';fresh=false;}else if(!current.includes('.'))current+='.';render();}
+  function calculate(a,b,op){if(op==='+')return a+b;if(op==='−')return a-b;if(op==='×')return a*b;if(op==='÷')return b===0?NaN:a/b;return b;}
+  function choose(op){if(current==='Error')return;const n=Number(current);if(operator&&previous!==null&&!fresh){const v=calculate(previous,n,operator);if(!Number.isFinite(v)){current='Error';previous=null;operator=null;expression='Tidak bisa membagi dengan nol';render();return;}current=raw(v);previous=v;}else previous=n;operator=op;fresh=true;expression=fmt(previous)+' '+op;render();}
+  function equals(){if(operator===null||previous===null||current==='Error')return;const a=previous,b=Number(current),op=operator,v=calculate(a,b,op);expression=fmt(a)+' '+op+' '+fmt(b)+' =';if(!Number.isFinite(v)){current='Error';toast('Operasi tidak valid');}else{current=raw(v);history.unshift({expr:expression,result:fmt(v),value:current});history=history.slice(0,20);saveHistory();}previous=null;operator=null;fresh=true;render();renderHistory();}
+  function clear(){current='0';previous=null;operator=null;fresh=false;expression='';render();}
+  function sign(){if(current==='Error')return;current=raw(-Number(current));render();}
+  function percent(){if(current==='Error')return;current=raw(Number(current)/100);render();}
+  function backspace(){if(fresh||current==='Error'){clear();return;}current=current.length>1?current.slice(0,-1):'0';if(current==='-')current='0';render();}
+  function saveHistory(){try{localStorage.setItem('qich-calc-history',JSON.stringify(history));}catch{}}
+  function renderHistory(){historyEl.innerHTML='';if(!history.length){historyEl.innerHTML='<div class="empty">Perhitungan kamu akan muncul di sini.</div>';return;}for(const item of history){const b=document.createElement('button');b.className='history-item';b.innerHTML='<div class="history-expr"></div><div class="history-result"></div>';b.querySelector('.history-expr').textContent=item.expr;b.querySelector('.history-result').textContent=item.result;b.addEventListener('click',()=>{current=item.value;previous=null;operator=null;fresh=true;expression=item.expr;render();});historyEl.appendChild(b);}}
+  keypad.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.digit!==undefined)digit(b.dataset.digit);else if(b.dataset.op)choose(b.dataset.op);else switch(b.dataset.action){case'clear':clear();break;case'sign':sign();break;case'percent':percent();break;case'decimal':decimal();break;case'equals':equals();break;}});
+  $('clearHistory').addEventListener('click',()=>{history=[];saveHistory();renderHistory();toast('Riwayat dihapus');});
+  document.addEventListener('keydown',e=>{if(/^[0-9]$/.test(e.key)){digit(e.key);return;}if(e.key==='.'||e.key===','){decimal();return;}const ops={'+':'+','-':'−','*':'×','/':'÷'};if(ops[e.key]){e.preventDefault();choose(ops[e.key]);return;}if(e.key==='Enter'||e.key==='='){e.preventDefault();equals();return;}if(e.key==='Backspace'){backspace();return;}if(e.key==='Escape'){clear();return;}if(e.key==='%')percent();});
+  render();renderHistory();
+})();
+</script>
+</body>
+</html>
