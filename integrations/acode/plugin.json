@@ -3,7 +3,7 @@
   "id": "dev.qich.acode",
   "name": "Qich Language Support",
   "main": "main.js",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "readme": "readme.md",
   "repository": "https://github.com/fqhmsff-sys/qich",
   "minVersionCode": 963,
