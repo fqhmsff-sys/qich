@@ -8,7 +8,7 @@ OUT = ROOT / "dist" / "qich-acode-plugin.zip"
 OUT.parent.mkdir(parents=True, exist_ok=True)
 
 with ZipFile(OUT, "w", ZIP_DEFLATED) as archive:
-    for name in ("plugin.json", "main.js", "readme.md"):
+    for name in ("plugin.json", "main.js", "readme.md", "icons/qich.svg"):
         archive.write(ROOT / name, arcname=name)
 
 print(f"Plugin ZIP created: {OUT}")
