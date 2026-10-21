@@ -1,23 +1,25 @@
 # Qich Calc
 
-Kalkulator web responsif dengan UI dark premium, dibuat sebagai contoh aplikasi di repository Qich.
-
-## Jalankan
-
-Buka `index.html` langsung di browser, atau jalankan server statis dari folder ini:
-
-```sh
-python3 -m http.server 8080
-```
-
-Lalu buka `http://localhost:8080`.
+Kalkulator yang logika dan programnya ditulis dalam **Qich** (`.qh), bukan JavaScript atau Python.
 
 ## Fitur
 
-- Operasi dasar: tambah, kurang, kali, bagi
-- Persen, ubah tanda, desimal, reset, dan backspace lewat keyboard
-- Riwayat perhitungan tersimpan di `localStorage`
-- Layout responsif untuk ponsel dan desktop
-- Tidak membutuhkan dependency atau build step
+- Operasi tambah, kurang, kali, dan bagi
+- Validasi pembagian dengan nol
+- Riwayat perhitungan selama program berjalan
+- Menu interaktif: hitung, lihat riwayat, hapus riwayat, keluar
+- Penanganan error agar program tetap berjalan
 
-**Catatan:** UI saat ini adalah web app mandiri HTML/CSS/JavaScript. Ini bukan native Android build dan belum menggunakan runtime Qich untuk logika di browser; dukungan event handler generator aplikasi Qich masih terbatas.
+## Menjalankan
+
+Pastikan Qich sudah dipasang dan perintah `qh` tersedia. Dari root repository:
+
+```sh
+qh run examples/calculator
+```
+
+Jika CLI di instalasimu menerima jalur file secara langsung, jalankan file `main.qh` dari folder ini sesuai sintaks `qh run` pada versi Qich yang terpasang.
+
+## Catatan UI
+
+Versi ini sengaja menggunakan antarmuka terminal karena event handler UI mobile Qich masih berstatus **PLANNED** di `docs/STATUS.md`. Jadi ini benar-benar program Qich yang bisa dikembangkan dan diuji, bukan web app HTML/JavaScript yang diklaim sebagai Qich. UI grafis premium dan APK Android native belum bisa dijanjikan berfungsi sampai dukungan event UI Android Qich selesai.
