@@ -44,6 +44,10 @@ Template showcase: `qh new x --template ai|web|app` (lihat `examples/`).
 
 `new run build test add remove check fmt update doc clean` (wajib blueprint) + `bundle` (.pyz portabel), `publish`, `audit`, `bridges`, `repl`.
 
+## Integrasi editor
+
+- [Qich Language Support for Acode](integrations/acode/readme.md) — syntax highlighting `.qh`, tombol Run, dan eksekusi lewat terminal Acode (versi awal).
+
 ## Dokumen
 
 - [docs/STATUS.md](docs/STATUS.md) — **apa yang IMPLEMENTED / TESTED / EXPERIMENTAL / PLANNED / UNAVAILABLE** (baca ini dulu)
