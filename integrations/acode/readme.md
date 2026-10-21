@@ -5,6 +5,7 @@ Integrasi awal bahasa Qich untuk editor Acode Android.
 ## Fitur
 
 - Mengenali file `.qh` dan mendaftarkan mode syntax highlighting Qich.
+- Ikon file Qich merah di daftar file Acode melalui File Icons API (Acode versionCode 1012+).
 - Highlight keyword, string, komentar, angka, tipe, dan nama fungsi.
 - Tombol ▶ Run saat file `.qh` aktif.
 - Command **Run current Qich file** (shortcut Ctrl+Alt+R jika keyboard mendukung).
@@ -84,4 +85,5 @@ ZIP dibuat di `integrations/acode/dist/qich-acode-plugin.zip`. Isi ZIP harus mem
 - File tersimpan dijalankan dari path aslinya agar konteks proyek dan impor relatif tetap terjaga. Pastikan terminal Acode bisa mengakses lokasi file tersebut.
 - File yang belum tersimpan dijalankan dari salinan sementara di `/tmp`; simpan file terlebih dahulu jika program menggunakan modul relatif.
 - Highlighting hanya pewarnaan token, bukan pemeriksaan semantik. Pesan error berasal dari CLI Qich.
+- Icon pack Qich perlu dipilih manual di pengaturan Acode dan hanya tersedia jika versi Acode menyediakan File Icons API (versionCode 1012+).
 - Jika tombol Run tidak muncul atau terminal gagal, catat versi Acode dan pesan error yang tampil sebelum mengubah konfigurasi lain.
