@@ -1,0 +1,63 @@
+// Qich Calc — kalkulator terminal native Qich
+// Jalankan dari root repository dengan: qh run examples/calculator
+
+fn hitung(a: float, op: str, b: float) -> float {
+    if op == "+" { rtrn a + b }
+    else if op == "-" { rtrn a - b }
+    else if op == "*" { rtrn a * b }
+    else if op == "/" {
+        if b == 0 { throw "Tidak bisa membagi dengan nol." }
+        rtrn a / b
+    }
+    else { throw f"Operator tidak dikenal: {op}" }
+}
+
+fn main() {
+    let riwayat = []
+    print("")
+    print("  QICH CALC")
+    print("  Kalkulator sederhana dengan bahasa Qich")
+    print("  ---------------------------------------")
+
+    whl true {
+        print("")
+        print("Menu: [1] Hitung  [2] Riwayat  [3] Hapus riwayat  [0] Keluar")
+        let pilihan = input("Pilih menu: ").trim()
+
+        if pilihan == "0" {
+            print("Sampai jumpa!")
+            brk
+        }
+        else if pilihan == "1" {
+            try {
+                let a = float(input("Angka pertama: "))
+                let op = input("Operator (+, -, *, /): ").trim()
+                let b = float(input("Angka kedua: "))
+                let hasil = hitung(a, op, b)
+                let catatan = f"{a} {op} {b} = {hasil}"
+                print(f"Hasil: {hasil}")
+                riwayat.push(catatan)
+            } catch e {
+                print(f"Error: {e}")
+            }
+        }
+        else if pilihan == "2" {
+            if len(riwayat) == 0 {
+                print("Belum ada perhitungan.")
+            } else {
+                print("")
+                print("  RIWAYAT PERHITUNGAN")
+                for item in riwayat {
+                    print(f"  {item}")
+                }
+            }
+        }
+        else if pilihan == "3" {
+            riwayat.clear()
+            print("Riwayat berhasil dikosongkan.")
+        }
+        else {
+            print("Pilihan tidak valid. Coba lagi.")
+        }
+    }
+}
