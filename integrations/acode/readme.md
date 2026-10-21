@@ -25,11 +25,19 @@ apk update
 apk add python3 py3-pip git
 git clone https://github.com/fqhmsff-sys/qich.git
 cd qich
-python3 -m pip install .
+python3 -m venv ~/.venvs/qich
+~/.venvs/qich/bin/pip install .
+export PATH="$HOME/.venvs/qich/bin:$PATH"
 qh --version
 ```
 
-Jika Alpine menolak instalasi paket Python ke environment sistem, ikuti pesan yang ditampilkan terminal; jangan menghapus proteksi paket secara paksa. Pastikan Acode Terminal bisa mengakses direktori proyek.
+Untuk mempertahankan PATH pada sesi terminal berikutnya, tambahkan baris berikut ke skrip startup terminal Acode (misalnya `/initrc` jika tersedia):
+
+```sh
+export PATH="$HOME/.venvs/qich/bin:$PATH"
+```
+
+Pastikan Acode Terminal bisa mengakses direktori proyek. Kalau perintah `python3 -m venv` tidak tersedia, periksa paket Python/venv yang tersedia di repositori Alpine perangkatmu.
 
 ## Memasang plugin selama pengembangan
 
