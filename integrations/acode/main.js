@@ -44,7 +44,8 @@ class QichAcodePlugin {
     try {
       this.editorLanguages = acode.require("editorLanguages");
       const cm = acode.require("codemirror");
-      const languageApi = acode.require("@codemirror/language");
+      let languageApi = null;
+      try { languageApi = acode.require("@codemirror/language"); } catch (_) {}
       const StreamLanguage = languageApi?.StreamLanguage || cm?.StreamLanguage;
       if (!this.editorLanguages?.register || !StreamLanguage?.define) {
         throw new Error("API CodeMirror language tidak tersedia di versi Acode ini.");
