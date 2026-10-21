@@ -2,6 +2,12 @@ name: Build Qich Acode Plugin
 
 on:
   push:
+    branches: [main]
+    paths:
+      - "integrations/acode/**"
+      - ".github/workflows/acode-plugin.yml"
+  pull_request:
+    branches: [main]
     paths:
       - "integrations/acode/**"
       - ".github/workflows/acode-plugin.yml"
@@ -13,22 +19,47 @@ permissions:
 jobs:
   package:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - name: Validate plugin manifest
         run: python -m json.tool integrations/acode/plugin.json > /dev/null
+
       - name: Check JavaScript syntax
         run: node --check integrations/acode/main.js
+
       - name: Package plugin
         run: python integrations/acode/package_plugin.py
+
+      - name: Verify installable ZIP
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          archive = Path("integrations/acode/dist/qich-acode-plugin.zip")
+          assert archive.is_file() and archive.stat().st_size > 0, "Plugin ZIP missing or empty"
+          with ZipFile(archive) as zf:
+              names = set(zf.namelist())
+              required = {"plugin.json", "main.js", "readme.md"}
+              missing = required - names
+              assert not missing, f"Plugin ZIP missing files: {sorted(missing)}"
+              corrupt = zf.testzip()
+              assert corrupt is None, f"Corrupt ZIP member: {corrupt}"
+          print(f"Verified {archive}")
+          PY
+
       - name: Upload installable ZIP
         uses: actions/upload-artifact@v4
         with:
           name: qich-acode-plugin
           path: integrations/acode/dist/qich-acode-plugin.zip
           if-no-files-found: error
+          retention-days: 30
