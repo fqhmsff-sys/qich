@@ -18,11 +18,13 @@ class QichAcodePlugin {
     this.editorLanguages = null;
     this.commands = null;
     this.modeRegistered = false;
+    this.fileIconRegistration = null;
     this.onSwitchFile = () => this.refreshActiveFile();
     this.onRenameFile = () => this.refreshActiveFile();
   }
 
-  async init() {
+  async init(baseUrl, fileIcons) {
+    this.registerFileIcons(baseUrl, fileIcons);
     this.registerLanguage();
     this.commands = acode.require("commands");
     this.commands.addCommand({
@@ -38,6 +40,24 @@ class QichAcodePlugin {
       editorManager.on("rename-file", this.onRenameFile);
     }
     this.refreshActiveFile();
+  }
+
+  registerFileIcons(baseUrl, fileIcons) {
+    if (!fileIcons?.register || !baseUrl) {
+      console.info("[Qich] File icon pack perlu Acode dengan File Icons API (versionCode 1012+).");
+      return;
+    }
+    try {
+      const root = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+      this.fileIconRegistration = fileIcons.register({
+        id: "dev.qich.acode.file-icons",
+        name: "Qich",
+        icons: `${root}icons/`,
+        fileExtensions: { qh: "qich" }
+      });
+    } catch (error) {
+      console.warn("[Qich] Gagal mendaftarkan ikon file:", error);
+    }
   }
 
   registerLanguage() {
@@ -184,11 +204,12 @@ class QichAcodePlugin {
     }
     try { this.commands?.removeCommand(COMMAND_ID); } catch (_) {}
     try { if (this.modeRegistered) this.editorLanguages?.unregister(LANGUAGE_ID); } catch (_) {}
+    try { this.fileIconRegistration?.dispose(); } catch (_) {}
   }
 }
 
 if (window.acode) {
   const plugin = new QichAcodePlugin();
-  acode.setPluginInit(PLUGIN_ID, async () => plugin.init());
+  acode.setPluginInit(PLUGIN_ID, async (baseUrl, _page, options) => plugin.init(baseUrl, options?.fileIcons));
   acode.setPluginUnmount(PLUGIN_ID, () => plugin.destroy());
 }
