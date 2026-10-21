@@ -1,0 +1,17 @@
+{
+  "$schema": "https://acode.app/schema/plugin/v0.1.0.json",
+  "id": "dev.qich.acode",
+  "name": "Qich Language Support",
+  "main": "main.js",
+  "version": "0.1.0",
+  "readme": "readme.md",
+  "repository": "https://github.com/fqhmsff-sys/qich",
+  "minVersionCode": 963,
+  "license": "MIT",
+  "keywords": ["qich", "language", "syntax highlighting", "runner"],
+  "price": 0,
+  "author": {
+    "name": "Qich contributors",
+    "github": "fqhmsff-sys"
+  }
+}
