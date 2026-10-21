@@ -48,7 +48,7 @@ jobs:
           assert archive.is_file() and archive.stat().st_size > 0, "Plugin ZIP missing or empty"
           with ZipFile(archive) as zf:
               names = set(zf.namelist())
-              required = {"plugin.json", "main.js", "readme.md"}
+              required = {"plugin.json", "main.js", "readme.md", "icons/qich.svg"}
               missing = required - names
               assert not missing, f"Plugin ZIP missing files: {sorted(missing)}"
               corrupt = zf.testzip()
