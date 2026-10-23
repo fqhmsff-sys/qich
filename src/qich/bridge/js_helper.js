@@ -1,7 +1,15 @@
 'use strict';
 // Helper Node.js untuk adapter js: (JSON lines via stdin/stdout).
 const readline = require('readline');
-const DENY = new Set(['child_process', 'cluster', 'vm', 'worker_threads', 'inspector', 'repl']);
+// Bridge JS berjalan sebagai proses terpisah, tetapi bukan sandbox OS. Modul yang
+// memberi akses proses, filesystem, jaringan, loader dinamis, atau introspeksi
+// sensitif harus ditolak secara default.
+const DENY = new Set([
+  'assert','async_hooks','child_process','cluster','dgram','diagnostics_channel',
+  'dns','fs','http','http2','https','inspector','module','net','os','perf_hooks',
+  'process','readline','repl','tls','trace_events','tty','v8','vm','wasi',
+  'worker_threads'
+]);
 const H = new Map(); let nid = 1;
 console.log = console.error;
 function isData(v, d) {
@@ -21,7 +29,11 @@ function enc(v) {
   const ty = typeof v;
   if (ty === 'number') return Number.isFinite(v) ? { t: 'v', v } : { t: 'f', v: String(v) };
   if (ty === 'string' || ty === 'boolean') return { t: 'v', v };
-  if (ty === 'bigint') return { t: 'v', v: Number(v) };
+  if (ty === 'bigint') {
+    const n = Number(v);
+    if (!Number.isSafeInteger(n)) throw new Error('BigInt di luar rentang integer aman Qich/JSON');
+    return { t: 'v', v: n };
+  }
   if (Array.isArray(v)) return { t: 'a', v: v.map(enc) };
   if (Buffer.isBuffer(v)) return { t: 'b', v: v.toString('base64') };
   if (v && isData(v, 0)) { const o = {}; for (const k of Object.keys(v)) o[k] = enc(v[k]); return { t: 'o', v: o }; }
@@ -30,22 +42,31 @@ function enc(v) {
 function dec(a) {
   switch (a.t) {
     case 'n': return null; case 'v': return a.v; case 'a': return a.v.map(dec);
-    case 'o': { const o = {}; for (const k of Object.keys(a.v)) o[k] = dec(a.v[k]); return o; }
+    case 'o': { const o = Object.create(null); for (const k of Object.keys(a.v)) o[k] = dec(a.v[k]); return o; }
     case 'h': if (!H.has(a.id)) throw new Error('handle tidak valid'); return H.get(a.id);
     case 'b': return Buffer.from(a.v, 'base64');
   }
   throw new Error('nilai tidak dikenal');
 }
+function safeMemberName(name) {
+  return typeof name === 'string' && !name.startsWith('_') &&
+    name !== 'constructor' && name !== 'prototype' && name !== '__proto__';
+}
 async function handle(r) {
   switch (r.op) {
     case 'import': {
-      const m = String(r.lib).replace(/^node:/, '');
-      if (DENY.has(m.split('/')[0])) throw new Error('modul diblokir oleh kebijakan keamanan');
-      return enc(require(r.lib));
+      const raw = String(r.lib);
+      const m = raw.replace(/^node:/, '').split('/')[0];
+      if (DENY.has(m)) throw new Error('modul diblokir oleh kebijakan keamanan');
+      return enc(require(raw));
     }
-    case 'get': { const o = H.get(r.id); const v = o[r.name]; if (typeof v === 'function') { const id = nid++; H.set(id, { f: v, self: o, isFn: true }); return { t: 'h', id, k: 'fn' }; } return enc(v); }
-    case 'call': { const e = H.get(r.id); const args = r.args.map(dec); if (e && e.isFn) return enc(await e.f.apply(e.self, args)); return enc(await e(...args)); }
-    case 'new': { const e = H.get(r.id); const f = e && e.isFn ? e.f : e; return enc(new f(...r.args.map(dec))); }
+    case 'get': {
+      if (!safeMemberName(r.name)) throw new Error('anggota diblokir oleh kebijakan keamanan');
+      const o = H.get(r.id); if (o === undefined) throw new Error('handle tidak valid');
+      const v = o[r.name]; if (typeof v === 'function') { const id = nid++; H.set(id, { f: v, self: o, isFn: true }); return { t: 'h', id, k: 'fn' }; } return enc(v);
+    }
+    case 'call': { const e = H.get(r.id); if (e === undefined) throw new Error('handle tidak valid'); const args = r.args.map(dec); if (e && e.isFn) return enc(await e.f.apply(e.self, args)); return enc(await e(...args)); }
+    case 'new': { const e = H.get(r.id); if (e === undefined) throw new Error('handle tidak valid'); const f = e && e.isFn ? e.f : e; return enc(new f(...r.args.map(dec))); }
     case 'free': H.delete(r.id); return { t: 'n' };
   }
   throw new Error('op tidak dikenal');
