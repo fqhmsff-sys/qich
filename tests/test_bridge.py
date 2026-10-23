@@ -29,6 +29,11 @@ class Bridge(unittest.TestCase):
         self.assertEqual(out.strip(), "ForeignError")
         with self.assertRaises(QichError): run("use js:child_process")
         with self.assertRaises(QichError): run("use js:vm")
+        # Proses terpisah bukan sandbox: modul dengan filesystem/network/process
+        # harus fail-closed kecuali kelak ada capability grant eksplisit.
+        for mod in ("fs", "http", "https", "net", "module", "os", "worker_threads"):
+            with self.assertRaises(QichError, msg=mod):
+                run(f"use js:{mod}")
 
     def test_c(self):
         out = run('use c:m\nuse c:c\nlet cos = m.fn("cos", ["f64"], "f64")\nlet strlen = c.fn("strlen", ["str"], "usize")\nprint(cos(0.0), strlen("héllo"))')
