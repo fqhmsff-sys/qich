@@ -54,8 +54,9 @@ Template showcase: `qh new x --template ai|web|app` (lihat `examples/`).
 - [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) — pemeriksaan sebelum rilis dan batasan yang masih diketahui
 - [docs/LANGUAGE.md](docs/LANGUAGE.md) — referensi bahasa
 - [docs/DECISIONS.md](docs/DECISIONS.md) — keputusan & resolusi konflik terhadap blueprint
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/STDLIB.md](docs/STDLIB.md), [docs/BRIDGES.md](docs/BRIDGES.md)
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md), [docs/STDLIB.md](docs/STDLIB.md), [docs/BRIDGES.md](docs/BRIDGES.md)
 - [security/SECURITY.md](security/SECURITY.md) — model ancaman & mekanisme
+- [SECURITY.md](SECURITY.md) — kebijakan pelaporan kerentanan
 
 ## Menjalankan test
 
