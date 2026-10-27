@@ -11,6 +11,13 @@ Qich tidak akan berpura-pura "mandiri" hanya karena interpreter diganti bahasa i
 5. **Independent toolchain** — distribusi Qich membawa compiler/runtime sendiri. Python/JS/C bridge menjadi interoperability opsional, bukan syarat menjalankan program Qich.
 6. **Multi-backend** — backend native/WASM/VM dapat berevolusi tanpa mengubah source language.
 
+## Status implementasi
+
+- QVM1 sudah memiliki envelope bytecode versioned, deterministik, checksum, validasi opcode/operand, dan batas resource.
+- Reference stack executor QVM1 sudah tersedia untuk mengunci semantik ISA dasar dan memiliki step/stack budget. Executor ini masih Python dan karena itu **belum** memenuhi milestone native bootstrap.
+- Langkah berikutnya: compiler subset Qich AST -> QVM1, differential tests terhadap interpreter referensi, lalu bootstrap VM kecil yang tidak membutuhkan Python/Node.
+- Jangan memperluas ISA hanya untuk mengejar jumlah opcode; tambah primitive ketika dibutuhkan oleh compiler dan dapat diuji konformansinya.
+
 ## Aturan migrasi
 
 - Jangan hapus reference runtime sebelum penggantinya lulus suite konformansi.
