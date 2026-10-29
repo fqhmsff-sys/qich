@@ -15,7 +15,7 @@ MAX_STRING = 1024 * 1024
 
 # Keep the first ISA intentionally tiny and capability-free.
 OPCODES = frozenset({
-    "CONST", "POP", "DUP",
+    "CONST", "POP", "DUP", "LOAD_LOCAL", "STORE_LOCAL",
     "ADD", "SUB", "MUL", "DIV", "MOD",
     "EQ", "NE", "LT", "LE", "GT", "GE",
     "NOT", "NEG",
@@ -57,11 +57,11 @@ def _validate(program):
             raise BytecodeError("opcode QVM tidak dikenal: %s" % op)
         if len(ins) == 2 and (type(ins[1]) is not int or isinstance(ins[1], bool)):
             raise BytecodeError("operand QVM harus integer")
-        if op in ("CONST", "JUMP", "JUMP_IF_FALSE") and len(ins) != 2:
+        if op in ("CONST", "LOAD_LOCAL", "STORE_LOCAL", "JUMP", "JUMP_IF_FALSE") and len(ins) != 2:
             raise BytecodeError("opcode %s membutuhkan operand" % op)
-        if op not in ("CONST", "JUMP", "JUMP_IF_FALSE") and len(ins) != 1:
+        if op not in ("CONST", "LOAD_LOCAL", "STORE_LOCAL", "JUMP", "JUMP_IF_FALSE") and len(ins) != 1:
             raise BytecodeError("opcode %s tidak menerima operand" % op)
-        if op == "CONST" and not 0 <= ins[1] < len(constants):
+        if op in ("LOAD_LOCAL", "STORE_LOCAL") and not 0 <= ins[1] < MAX_CONSTANTS:\n            raise BytecodeError("slot local QVM di luar batas")\n        if op == "CONST" and not 0 <= ins[1] < len(constants):
             raise BytecodeError("indeks constant QVM di luar batas")
         if op in ("JUMP", "JUMP_IF_FALSE") and not 0 <= ins[1] <= len(code):
             raise BytecodeError("target jump QVM di luar batas")
