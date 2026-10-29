@@ -15,7 +15,7 @@ Qich tidak akan berpura-pura "mandiri" hanya karena interpreter diganti bahasa i
 
 - QVM1 sudah memiliki envelope bytecode versioned, deterministik, checksum, validasi opcode/operand, dan batas resource.
 - Reference stack executor QVM1 sudah tersedia untuk mengunci semantik ISA dasar dan memiliki step/stack budget. Executor ini masih Python dan karena itu **belum** memenuhi milestone native bootstrap.
-- Langkah berikutnya: compiler subset Qich AST -> QVM1, differential tests terhadap interpreter referensi, lalu bootstrap VM kecil yang tidak membutuhkan Python/Node.
+- Compiler subset Qich AST -> QVM1 sekarang tersedia untuk literal, unary dasar, arithmetic/comparison binary, ternary, dan expression statements; syntax di luar subset gagal tertutup.\n- Langkah berikutnya: differential tests terhadap interpreter referensi, perluas compiler/ISA hanya untuk semantics yang teruji, lalu bootstrap VM kecil yang tidak membutuhkan Python/Node.
 - Jangan memperluas ISA hanya untuk mengejar jumlah opcode; tambah primitive ketika dibutuhkan oleh compiler dan dapat diuji konformansinya.
 
 ## Aturan migrasi
