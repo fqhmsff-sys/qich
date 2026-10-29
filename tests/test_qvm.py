@@ -2,7 +2,7 @@
 import unittest
 
 from qich.qvm.bytecode import BytecodeError, decode, encode
-from qich.qvm.vm import VMError, execute
+from qich.qvm.vm import VMError, execute\nfrom qich.qvm.compiler import CompileError, compile_program\nfrom qich.compiler import parse
 
 
 class QVMBytecodeTests(unittest.TestCase):
