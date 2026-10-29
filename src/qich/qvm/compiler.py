@@ -22,6 +22,7 @@ class _Compiler:
     def __init__(self):
         self.constants = []
         self.code = []
+        self.locals = {}
 
     def const(self, value):
         # Reuse constants where equality and type agree. bool must not alias int.
@@ -35,6 +36,13 @@ class _Compiler:
         self.code.append([op] if arg is None else [op, arg])
         return len(self.code) - 1
 
+    def local(self, name, create=False):
+        if name not in self.locals:
+            if not create:
+                raise CompileError("variabel belum dideklarasi: %s" % name)
+            self.locals[name] = len(self.locals)
+        return self.locals[name]
+
     def expr(self, node):
         if isinstance(node, A.Num):
             self.emit("CONST", self.const(node.value))
@@ -44,6 +52,8 @@ class _Compiler:
             self.emit("CONST", self.const(node.value))
         elif isinstance(node, A.Nil):
             self.emit("CONST", self.const(None))
+        elif isinstance(node, A.Ident):
+            self.emit("LOAD_LOCAL", self.local(node.name))
         elif isinstance(node, A.Unary) and node.op in _UNARY:
             self.expr(node.operand)
             self.emit(_UNARY[node.op])
@@ -68,11 +78,22 @@ class _Compiler:
         if not program.body:
             self.emit("CONST", self.const(None))
         for i, stmt in enumerate(program.body):
-            if not isinstance(stmt, A.ExprStmt):
+            produces = False
+            if isinstance(stmt, A.ExprStmt):
+                self.expr(stmt.expr)
+                produces = True
+            elif isinstance(stmt, A.Let):
+                self.expr(stmt.value if stmt.value is not None else A.Nil())
+                self.emit("STORE_LOCAL", self.local(stmt.name, create=True))
+            elif isinstance(stmt, A.Assign) and isinstance(stmt.target, A.Ident) and stmt.op == "=":
+                self.expr(stmt.value)
+                self.emit("STORE_LOCAL", self.local(stmt.target.name))
+            else:
                 raise CompileError("statement belum didukung QVM1: %s" % type(stmt).__name__)
-            self.expr(stmt.expr)
-            if i + 1 < len(program.body):
+            if produces and i + 1 < len(program.body):
                 self.emit("POP")
+        if program.body and not isinstance(program.body[-1], A.ExprStmt):
+            self.emit("CONST", self.const(None))
         self.emit("HALT")
         result = {"constants": self.constants, "code": self.code}
         return _validate(result)
