@@ -30,6 +30,7 @@ def execute(program, *, max_steps=DEFAULT_MAX_STEPS, max_stack=DEFAULT_MAX_STACK
     constants = program["constants"]
     code = program["code"]
     stack = []
+    locals_ = {}
     pc = 0
     steps = 0
 
@@ -56,6 +57,12 @@ def execute(program, *, max_steps=DEFAULT_MAX_STEPS, max_stack=DEFAULT_MAX_STACK
             push(constants[ins[1]])
         elif op == "POP":
             pop()
+        elif op == "LOAD_LOCAL":
+            if ins[1] not in locals_:
+                raise VMError("local QVM belum diinisialisasi")
+            push(locals_[ins[1]])
+        elif op == "STORE_LOCAL":
+            locals_[ins[1]] = pop()
         elif op == "DUP":
             value = pop()
             push(value)
