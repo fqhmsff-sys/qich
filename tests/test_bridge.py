@@ -25,10 +25,13 @@ class Bridge(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("node"), "node tidak tersedia")
     def test_javascript_errors_and_isolation(self):
-        out = run('use js:fs\ntry { fs.readFileSync("/tidak/ada") } catch e { print(e.kind) }', Policy())
-        self.assertEqual(out.strip(), "ForeignError")
-        with self.assertRaises(QichError): run("use js:child_process")
-        with self.assertRaises(QichError): run("use js:vm")
+        # Bridge Node bukan sandbox OS. Modul dengan filesystem/network/process
+        # harus fail-closed. Dulu test ini justru mengharapkan fs bisa dipakai,
+        # sehingga bertentangan dengan kebijakan dan membuat CI merah.
+        for mod in ("fs", "node:fs", "http", "https", "net", "module", "os",
+                    "worker_threads", "child_process", "vm"):
+            with self.assertRaises(QichError, msg=mod):
+                run(f"use js:{mod}")
 
     def test_c(self):
         out = run('use c:m\nuse c:c\nlet cos = m.fn("cos", ["f64"], "f64")\nlet strlen = c.fn("strlen", ["str"], "usize")\nprint(cos(0.0), strlen("héllo"))')

@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [test_language.py, test_bridge.py, test_packages.py, test_security.py, test_chyb_cli.py]
+        suite: [test_language.py, test_bridge.py, test_packages.py, test_security.py, test_security_regressions.py, test_qvm.py, test_qvm_differential.py, test_chyb_cli.py]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
