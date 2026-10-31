@@ -97,10 +97,15 @@ def execute(program, *, max_steps=DEFAULT_MAX_STEPS, max_stack=DEFAULT_MAX_STACK
                 raise VMError("operasi QVM gagal: %s" % op) from exc
             push(value)
         elif op == "NOT":
-            push(not pop())
+            value = pop()
+            if type(value) is not bool:
+                raise VMError("operasi QVM gagal: NOT membutuhkan bool")
+            push(not value)
         elif op == "NEG":
             value = pop()
             try:
+                if type(value) not in (int, float):
+                    raise TypeError("NEG membutuhkan angka")
                 push(-value)
             except TypeError as exc:
                 raise VMError("operasi QVM gagal: NEG") from exc
@@ -108,6 +113,8 @@ def execute(program, *, max_steps=DEFAULT_MAX_STEPS, max_stack=DEFAULT_MAX_STACK
             pc = ins[1]
         elif op == "JUMP_IF_FALSE":
             condition = pop()
+            if type(condition) is not bool:
+                raise VMError("kondisi QVM harus bool")
             if not condition:
                 pc = ins[1]
         elif op == "HALT":
