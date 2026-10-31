@@ -7,7 +7,8 @@ claim that Qich is self-hosted yet.
 import hashlib
 import json
 
-MAGIC = b"QVM1\n"
+MAGIC = b"QVM1
+"
 MAX_BYTECODE = 16 * 1024 * 1024
 MAX_CONSTANTS = 100_000
 MAX_INSTRUCTIONS = 100_000
@@ -61,7 +62,9 @@ def _validate(program):
             raise BytecodeError("opcode %s membutuhkan operand" % op)
         if op not in ("CONST", "LOAD_LOCAL", "STORE_LOCAL", "JUMP", "JUMP_IF_FALSE") and len(ins) != 1:
             raise BytecodeError("opcode %s tidak menerima operand" % op)
-        if op in ("LOAD_LOCAL", "STORE_LOCAL") and not 0 <= ins[1] < MAX_CONSTANTS:\n            raise BytecodeError("slot local QVM di luar batas")\n        if op == "CONST" and not 0 <= ins[1] < len(constants):
+        if op in ("LOAD_LOCAL", "STORE_LOCAL") and not 0 <= ins[1] < MAX_CONSTANTS:
+            raise BytecodeError("slot local QVM di luar batas")
+        if op == "CONST" and not 0 <= ins[1] < len(constants):
             raise BytecodeError("indeks constant QVM di luar batas")
         if op in ("JUMP", "JUMP_IF_FALSE") and not 0 <= ins[1] <= len(code):
             raise BytecodeError("target jump QVM di luar batas")
@@ -75,7 +78,8 @@ def encode(program):
     if len(body) > MAX_BYTECODE:
         raise BytecodeError("bytecode QVM terlalu besar")
     digest = hashlib.sha256(body).hexdigest().encode("ascii")
-    return MAGIC + digest + b"\n" + body
+    return MAGIC + digest + b"
+" + body
 
 
 def decode(data):
@@ -84,7 +88,8 @@ def decode(data):
     if not data.startswith(MAGIC):
         raise BytecodeError("magic/versi QVM tidak didukung")
     rest = data[len(MAGIC):]
-    nl = rest.find(b"\n")
+    nl = rest.find(b"
+")
     if nl != 64:
         raise BytecodeError("header QVM rusak")
     digest, body = rest[:64], rest[65:]
