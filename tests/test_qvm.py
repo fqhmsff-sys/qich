@@ -88,5 +88,27 @@ class QVMExecutorTests(unittest.TestCase):
             execute(program)
 
 
+class QVMCompilerRegressionTests(unittest.TestCase):
+    def _run(self, source):
+        return execute(compile_program(parse(source, "qvm-regression.qh")))
+
+    def test_locals_compile_and_execute(self):
+        self.assertEqual(self._run("let x = 2\nx = 7\nx + 1"), 8)
+
+    def test_uninitialized_local_bytecode_fails_closed(self):
+        with self.assertRaises(VMError):
+            execute({"constants": [], "code": [["LOAD_LOCAL", 0], ["HALT"]]})
+
+    def test_conditions_require_bool(self):
+        with self.assertRaises(VMError):
+            self._run("1 ? 2 : 3")
+        with self.assertRaises(VMError):
+            execute({"constants": [1], "code": [["CONST", 0], ["NOT"], ["HALT"]]})
+
+    def test_local_slot_bounds_are_verified(self):
+        with self.assertRaises(BytecodeError):
+            encode({"constants": [], "code": [["LOAD_LOCAL", 100000], ["HALT"]]})
+
+
 if __name__ == "__main__":
     unittest.main()
