@@ -1,7 +1,7 @@
 """Regression tests for the versioned QVM bytecode envelope and executor."""
 import unittest
 
-from qich.qvm.bytecode import BytecodeError, decode, encode
+from qich.qvm.bytecode import BytecodeError, decode, encode, MAX_STRING, MAX_INTEGER_BITS
 from qich.qvm.vm import VMError, execute
 from qich.qvm.compiler import CompileError, compile_program
 from qich.compiler import parse
@@ -26,9 +26,7 @@ class QVMBytecodeTests(unittest.TestCase):
     def test_unknown_version_is_rejected(self):
         blob = encode({"constants": [], "code": [["HALT"]]})
         with self.assertRaises(BytecodeError):
-            decode(blob.replace(b"QVM1
-", b"QVM9
-", 1))
+            decode(blob.replace(b"QVM1\n", b"QVM9\n", 1))
 
     def test_invalid_opcode_is_rejected(self):
         with self.assertRaises(BytecodeError):
