@@ -83,6 +83,8 @@ class _Compiler:
                 self.expr(stmt.expr)
                 produces = True
             elif isinstance(stmt, A.Let):
+                if stmt.ann is not None:
+                    raise CompileError("anotasi variabel belum didukung QVM1")
                 self.expr(stmt.value if stmt.value is not None else A.Nil())
                 self.emit("STORE_LOCAL", self.local(stmt.name, create=True))
             elif isinstance(stmt, A.Assign) and isinstance(stmt.target, A.Ident) and stmt.op == "=":
