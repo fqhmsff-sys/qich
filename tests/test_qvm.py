@@ -1,9 +1,10 @@
 """Regression tests for the versioned QVM bytecode envelope and executor."""
+import hashlib
 import unittest
 
 from qich.compiler import parse
 from qich.qvm.bytecode import (
-    BytecodeError, MAX_INTEGER_BITS, MAX_STRING, decode, encode,
+    BytecodeError, MAGIC, MAX_INTEGER_BITS, MAX_STRING, decode, encode,
 )
 from qich.qvm.compiler import CompileError, compile_program
 from qich.qvm.vm import VMError, execute
@@ -37,6 +38,16 @@ class QVMBytecodeTests(unittest.TestCase):
     def test_resource_limits_are_enforced(self):
         with self.assertRaises(BytecodeError):
             encode({"constants": [], "code": [["HALT"]] * 100001})
+
+    def test_duplicate_json_keys_are_rejected(self):
+        body = b'{"constants":[],"constants":[1],"code":[["HALT"]]}'
+        digest = hashlib.sha256(body).hexdigest().encode("ascii")
+        with self.assertRaises(BytecodeError):
+            decode(MAGIC + digest + b"\n" + body)
+
+    def test_invalid_unicode_constant_is_rejected(self):
+        with self.assertRaises(BytecodeError):
+            encode({"constants": ["\ud800"], "code": [["HALT"]]})
 
     def test_non_finite_and_oversized_constants_are_rejected(self):
         for value in (float("nan"), float("inf"), 1 << MAX_INTEGER_BITS):
