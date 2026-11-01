@@ -1,27 +1,26 @@
 """QVM v1 bytecode envelope.
 
-This deliberately starts small: a deterministic, versioned, bounded instruction
-format that can be implemented by a future non-Python bootstrap VM. It is not a
-claim that Qich is self-hosted yet.
+The format is deterministic, versioned and bounded so a future native bootstrap
+VM can implement it without inheriting Python object semantics.
 """
 import hashlib
+import hmac
 import json
+import math
 
-MAGIC = b"QVM1
-"
+MAGIC = b"QVM1\n"
 MAX_BYTECODE = 16 * 1024 * 1024
 MAX_CONSTANTS = 100_000
 MAX_INSTRUCTIONS = 100_000
 MAX_STRING = 1024 * 1024
+MAX_INTEGER_BITS = 1_000_000
 
-# Keep the first ISA intentionally tiny and capability-free.
+# Capability-free instruction set. New operations require conformance tests.
 OPCODES = frozenset({
     "CONST", "POP", "DUP", "LOAD_LOCAL", "STORE_LOCAL",
     "ADD", "SUB", "MUL", "DIV", "MOD",
     "EQ", "NE", "LT", "LE", "GT", "GE",
-    "NOT", "NEG",
-    "JUMP", "JUMP_IF_FALSE",
-    "HALT",
+    "NOT", "NEG", "JUMP", "JUMP_IF_FALSE", "HALT",
 })
 
 
@@ -30,7 +29,15 @@ class BytecodeError(ValueError):
 
 
 def _constant(value):
-    if value is None or type(value) in (bool, int, float):
+    if value is None or type(value) is bool:
+        return value
+    if type(value) is int:
+        if value.bit_length() > MAX_INTEGER_BITS:
+            raise BytecodeError("integer constant QVM terlalu besar")
+        return value
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise BytecodeError("float constant QVM harus finite")
         return value
     if type(value) is str:
         if len(value.encode("utf-8")) > MAX_STRING:
@@ -58,9 +65,10 @@ def _validate(program):
             raise BytecodeError("opcode QVM tidak dikenal: %s" % op)
         if len(ins) == 2 and (type(ins[1]) is not int or isinstance(ins[1], bool)):
             raise BytecodeError("operand QVM harus integer")
-        if op in ("CONST", "LOAD_LOCAL", "STORE_LOCAL", "JUMP", "JUMP_IF_FALSE") and len(ins) != 2:
+        needs_operand = op in ("CONST", "LOAD_LOCAL", "STORE_LOCAL", "JUMP", "JUMP_IF_FALSE")
+        if needs_operand and len(ins) != 2:
             raise BytecodeError("opcode %s membutuhkan operand" % op)
-        if op not in ("CONST", "LOAD_LOCAL", "STORE_LOCAL", "JUMP", "JUMP_IF_FALSE") and len(ins) != 1:
+        if not needs_operand and len(ins) != 1:
             raise BytecodeError("opcode %s tidak menerima operand" % op)
         if op in ("LOAD_LOCAL", "STORE_LOCAL") and not 0 <= ins[1] < MAX_CONSTANTS:
             raise BytecodeError("slot local QVM di luar batas")
@@ -73,13 +81,17 @@ def _validate(program):
 
 def encode(program):
     _validate(program)
-    body = json.dumps(program, ensure_ascii=False, allow_nan=False,
-                      sort_keys=True, separators=(",", ":")).encode("utf-8")
+    try:
+        body = json.dumps(
+            program, ensure_ascii=False, allow_nan=False,
+            sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise BytecodeError("program QVM tidak dapat diserialisasi") from exc
     if len(body) > MAX_BYTECODE:
         raise BytecodeError("bytecode QVM terlalu besar")
     digest = hashlib.sha256(body).hexdigest().encode("ascii")
-    return MAGIC + digest + b"
-" + body
+    return MAGIC + digest + b"\n" + body
 
 
 def decode(data):
@@ -88,12 +100,12 @@ def decode(data):
     if not data.startswith(MAGIC):
         raise BytecodeError("magic/versi QVM tidak didukung")
     rest = data[len(MAGIC):]
-    nl = rest.find(b"
-")
+    nl = rest.find(b"\n")
     if nl != 64:
         raise BytecodeError("header QVM rusak")
     digest, body = rest[:64], rest[65:]
-    if hashlib.sha256(body).hexdigest().encode("ascii") != digest:
+    actual = hashlib.sha256(body).hexdigest().encode("ascii")
+    if not hmac.compare_digest(actual, digest):
         raise BytecodeError("checksum QVM tidak cocok")
     try:
         program = json.loads(body)
