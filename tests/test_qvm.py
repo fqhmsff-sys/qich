@@ -129,6 +129,19 @@ class QVMCompilerRegressionTests(unittest.TestCase):
             compile_program(parse("let x: int = 1", "qvm-regression.qh"))
 
 
+    def test_short_circuit_boolean_operators(self):
+        self.assertIs(self._run("false && (1 / 0 > 0)"), False)
+        self.assertIs(self._run("true || (1 / 0 > 0)"), True)
+        self.assertIs(self._run("true && false"), False)
+        self.assertIs(self._run("false || true"), True)
+
+    def test_logical_operators_require_boolean_operands(self):
+        with self.assertRaises(VMError):
+            self._run("true && 1")
+        with self.assertRaises(VMError):
+            self._run("1 || true")
+
+
 class QVMSemanticHardeningTests(unittest.TestCase):
     def _run(self, source):
         return execute(compile_program(parse(source, "qvm-hardening.qh")))
