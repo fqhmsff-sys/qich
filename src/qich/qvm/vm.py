@@ -1,10 +1,10 @@
-"""Small reference executor for the QVM v1 instruction set.
+"""Bounded, capability-free reference executor for QVM v1."""
+import math
 
-This executor is intentionally capability-free and bounded.  It is the semantic
-oracle for a future bootstrap VM implemented outside the Python reference
-runtime; it does not make Qich self-hosted by itself.
-"""
-from .bytecode import BytecodeError, _validate
+from .bytecode import (
+    BytecodeError, MAX_INTEGER_BITS, MAX_STRING, _validate,
+)
+from ..runtime.values import q_eq
 
 DEFAULT_MAX_STEPS = 1_000_000
 DEFAULT_MAX_STACK = 65_536
@@ -14,12 +14,78 @@ class VMError(RuntimeError):
     pass
 
 
-def execute(program, *, max_steps=DEFAULT_MAX_STEPS, max_stack=DEFAULT_MAX_STACK):
-    """Execute a validated QVM program and return the top stack value.
+def _number(value):
+    return type(value) in (int, float)
 
-    JUMP targets may point one instruction past the code to terminate cleanly.
-    Resource budgets are mandatory positive integers to keep malformed programs
-    from consuming unbounded CPU or stack memory.
+
+def _checked(value):
+    if type(value) is int and value.bit_length() > MAX_INTEGER_BITS:
+        raise VMError("batas ukuran integer QVM terlampaui")
+    if type(value) is float and not math.isfinite(value):
+        raise VMError("hasil float QVM tidak finite")
+    if type(value) is str:
+        if len(value) > MAX_STRING or len(value.encode("utf-8")) > MAX_STRING:
+            raise VMError("batas ukuran string QVM terlampaui")
+    return value
+
+
+def _binary(op, left, right):
+    numeric = _number(left) and _number(right)
+    if op == "EQ":
+        return q_eq(left, right)
+    if op == "NE":
+        return not q_eq(left, right)
+    if op in ("LT", "LE", "GT", "GE"):
+        compatible = numeric or (type(left) is str and type(right) is str)
+        if not compatible:
+            raise VMError("operand perbandingan QVM tidak kompatibel")
+        if op == "LT":
+            return left < right
+        if op == "LE":
+            return left <= right
+        if op == "GT":
+            return left > right
+        return left >= right
+    if op == "ADD":
+        if numeric or (type(left) is str and type(right) is str):
+            return left + right
+        raise VMError("ADD QVM membutuhkan dua angka atau dua string")
+    if op == "SUB":
+        if numeric:
+            return left - right
+        raise VMError("SUB QVM membutuhkan dua angka")
+    if op == "MUL":
+        if numeric:
+            return left * right
+        if type(left) is str and type(right) is int:
+            if len(left) * max(right, 0) > MAX_STRING:
+                raise VMError("hasil string QVM terlalu besar")
+            return left * right
+        if type(right) is str and type(left) is int:
+            if len(right) * max(left, 0) > MAX_STRING:
+                raise VMError("hasil string QVM terlalu besar")
+            return right * left
+        raise VMError("MUL QVM membutuhkan angka atau string dikali int")
+    if op == "DIV":
+        if not numeric:
+            raise VMError("DIV QVM membutuhkan dua angka")
+        if right == 0:
+            raise VMError("pembagian QVM dengan nol")
+        return left / right
+    if op == "MOD":
+        if not numeric:
+            raise VMError("MOD QVM membutuhkan dua angka")
+        if right == 0:
+            raise VMError("modulo QVM dengan nol")
+        return left % right
+    raise BytecodeError("opcode binary QVM tidak dikenal: %s" % op)
+
+
+def execute(program, *, max_steps=DEFAULT_MAX_STEPS, max_stack=DEFAULT_MAX_STACK):
+    """Execute validated QVM and return the top stack value.
+
+    A jump may target one instruction past the end to terminate cleanly.
+    Positive step and stack budgets are mandatory.
     """
     _validate(program)
     if type(max_steps) is not int or isinstance(max_steps, bool) or max_steps <= 0:
@@ -42,7 +108,7 @@ def execute(program, *, max_steps=DEFAULT_MAX_STEPS, max_stack=DEFAULT_MAX_STACK
     def push(value):
         if len(stack) >= max_stack:
             raise VMError("batas stack QVM terlampaui")
-        stack.append(value)
+        stack.append(_checked(value))
 
     while pc < len(code):
         steps += 1
@@ -67,48 +133,24 @@ def execute(program, *, max_steps=DEFAULT_MAX_STEPS, max_stack=DEFAULT_MAX_STACK
             value = pop()
             push(value)
             push(value)
-        elif op in ("ADD", "SUB", "MUL", "DIV", "MOD", "EQ", "NE", "LT", "LE", "GT", "GE"):
+        elif op in ("ADD", "SUB", "MUL", "DIV", "MOD",
+                    "EQ", "NE", "LT", "LE", "GT", "GE"):
             right = pop()
             left = pop()
             try:
-                if op == "ADD":
-                    value = left + right
-                elif op == "SUB":
-                    value = left - right
-                elif op == "MUL":
-                    value = left * right
-                elif op == "DIV":
-                    value = left / right
-                elif op == "MOD":
-                    value = left % right
-                elif op == "EQ":
-                    value = left == right
-                elif op == "NE":
-                    value = left != right
-                elif op == "LT":
-                    value = left < right
-                elif op == "LE":
-                    value = left <= right
-                elif op == "GT":
-                    value = left > right
-                else:
-                    value = left >= right
+                push(_binary(op, left, right))
             except (ArithmeticError, TypeError, ValueError) as exc:
                 raise VMError("operasi QVM gagal: %s" % op) from exc
-            push(value)
         elif op == "NOT":
             value = pop()
             if type(value) is not bool:
-                raise VMError("operasi QVM gagal: NOT membutuhkan bool")
+                raise VMError("NOT QVM membutuhkan bool")
             push(not value)
         elif op == "NEG":
             value = pop()
-            try:
-                if type(value) not in (int, float):
-                    raise TypeError("NEG membutuhkan angka")
-                push(-value)
-            except TypeError as exc:
-                raise VMError("operasi QVM gagal: NEG") from exc
+            if not _number(value):
+                raise VMError("NEG QVM membutuhkan angka")
+            push(-value)
         elif op == "JUMP":
             pc = ins[1]
         elif op == "JUMP_IF_FALSE":
@@ -119,7 +161,7 @@ def execute(program, *, max_steps=DEFAULT_MAX_STEPS, max_stack=DEFAULT_MAX_STACK
                 pc = ins[1]
         elif op == "HALT":
             break
-        else:  # _validate should make this unreachable.
+        else:  # _validate makes this unreachable for well-formed programs.
             raise BytecodeError("opcode QVM tidak dikenal: %s" % op)
 
     return stack[-1] if stack else None
