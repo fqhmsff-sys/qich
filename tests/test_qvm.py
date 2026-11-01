@@ -1,10 +1,12 @@
 """Regression tests for the versioned QVM bytecode envelope and executor."""
 import unittest
 
-from qich.qvm.bytecode import BytecodeError, decode, encode, MAX_STRING, MAX_INTEGER_BITS
-from qich.qvm.vm import VMError, execute
-from qich.qvm.compiler import CompileError, compile_program
 from qich.compiler import parse
+from qich.qvm.bytecode import (
+    BytecodeError, MAX_INTEGER_BITS, MAX_STRING, decode, encode,
+)
+from qich.qvm.compiler import CompileError, compile_program
+from qich.qvm.vm import VMError, execute
 
 
 class QVMBytecodeTests(unittest.TestCase):
@@ -35,6 +37,12 @@ class QVMBytecodeTests(unittest.TestCase):
     def test_resource_limits_are_enforced(self):
         with self.assertRaises(BytecodeError):
             encode({"constants": [], "code": [["HALT"]] * 100001})
+
+    def test_non_finite_and_oversized_constants_are_rejected(self):
+        for value in (float("nan"), float("inf"), 1 << MAX_INTEGER_BITS):
+            with self.subTest(value_type=type(value).__name__):
+                with self.assertRaises(BytecodeError):
+                    encode({"constants": [value], "code": [["HALT"]]})
 
 
 class QVMExecutorTests(unittest.TestCase):
@@ -85,6 +93,15 @@ class QVMExecutorTests(unittest.TestCase):
         with self.assertRaises(VMError):
             execute(program)
 
+    def test_string_repeat_is_bounded(self):
+        self.assertEqual(execute(compile_program(parse('"q" * 3'))), "qqq")
+        program = {
+            "constants": ["x" * MAX_STRING, 2],
+            "code": [["CONST", 0], ["CONST", 1], ["MUL"], ["HALT"]],
+        }
+        with self.assertRaises(VMError):
+            execute(program)
+
 
 class QVMCompilerRegressionTests(unittest.TestCase):
     def _run(self, source):
@@ -106,6 +123,25 @@ class QVMCompilerRegressionTests(unittest.TestCase):
     def test_local_slot_bounds_are_verified(self):
         with self.assertRaises(BytecodeError):
             encode({"constants": [], "code": [["LOAD_LOCAL", 100000], ["HALT"]]})
+
+    def test_typed_let_fails_closed_until_annotation_checks_exist(self):
+        with self.assertRaises(CompileError):
+            compile_program(parse("let x: int = 1", "qvm-regression.qh"))
+
+
+class QVMSemanticHardeningTests(unittest.TestCase):
+    def _run(self, source):
+        return execute(compile_program(parse(source, "qvm-hardening.qh")))
+
+    def test_equality_matches_qich_bool_and_numeric_rules(self):
+        self.assertIs(self._run("true == 1"), False)
+        self.assertIs(self._run("1 == 1.0"), True)
+
+    def test_boolean_is_not_a_number(self):
+        for source in ("true + 1", "true * 3", "true < 2", "-true"):
+            with self.subTest(source=source):
+                with self.assertRaises(VMError):
+                    self._run(source)
 
 
 if __name__ == "__main__":
