@@ -4,7 +4,7 @@ import unittest
 from qich.compiler import parse
 from qich.qvm.compiler import compile_program
 from qich.qvm.vm import execute
-from qich.runtime.interp import arith, compare
+from qich.runtime.interp import arith, compare\nfrom qich.runtime.values import q_eq
 
 
 def reference_expr(node, env=None):
@@ -40,7 +40,7 @@ class DifferentialQVMTests(unittest.TestCase):
         corpus = [
             "nil", "true", "false", "7", "1.5", '"qich"',
             "1 + 2 * 3", "9 / 3", "10 % 4", "-5",
-            "1 < 2", "2 <= 2", "3 > 2", "3 >= 3",
+            "1 < 2", "2 <= 2", "3 > 2", "3 >= 3",\n            "true == 1", "1 == 1.0", "!false", '"q" * 3',
             '"qi" + "ch"', "true ? 7 : 9", "false ? 7 : 9",
         ]
         for source in corpus:
