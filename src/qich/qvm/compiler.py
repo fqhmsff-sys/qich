@@ -57,6 +57,36 @@ class _Compiler:
         elif isinstance(node, A.Unary) and node.op in _UNARY:
             self.expr(node.operand)
             self.emit(_UNARY[node.op])
+        elif isinstance(node, A.Binary) and node.op == "&&":
+            self.expr(node.left)
+            left_false = self.emit("JUMP_IF_FALSE", 0)
+            self.expr(node.right)
+            right_false = self.emit("JUMP_IF_FALSE", 0)
+            self.emit("CONST", self.const(True))
+            end = self.emit("JUMP", 0)
+            false_target = len(self.code)
+            self.emit("CONST", self.const(False))
+            end_target = len(self.code)
+            self.code[left_false][1] = false_target
+            self.code[right_false][1] = false_target
+            self.code[end][1] = end_target
+        elif isinstance(node, A.Binary) and node.op == "||":
+            self.expr(node.left)
+            left_false = self.emit("JUMP_IF_FALSE", 0)
+            self.emit("CONST", self.const(True))
+            left_end = self.emit("JUMP", 0)
+            right_target = len(self.code)
+            self.expr(node.right)
+            right_false = self.emit("JUMP_IF_FALSE", 0)
+            self.emit("CONST", self.const(True))
+            right_end = self.emit("JUMP", 0)
+            false_target = len(self.code)
+            self.emit("CONST", self.const(False))
+            end_target = len(self.code)
+            self.code[left_false][1] = right_target
+            self.code[right_false][1] = false_target
+            self.code[left_end][1] = end_target
+            self.code[right_end][1] = end_target
         elif isinstance(node, A.Binary) and node.op in _BIN:
             self.expr(node.left)
             self.expr(node.right)
