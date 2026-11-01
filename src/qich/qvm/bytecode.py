@@ -13,7 +13,7 @@ MAX_BYTECODE = 16 * 1024 * 1024
 MAX_CONSTANTS = 100_000
 MAX_INSTRUCTIONS = 100_000
 MAX_STRING = 1024 * 1024
-MAX_INTEGER_BITS = 1_000_000
+MAX_INTEGER_BITS = 13_000
 
 # Capability-free instruction set. New operations require conformance tests.
 OPCODES = frozenset({
@@ -40,7 +40,11 @@ def _constant(value):
             raise BytecodeError("float constant QVM harus finite")
         return value
     if type(value) is str:
-        if len(value.encode("utf-8")) > MAX_STRING:
+        try:
+            size = len(value.encode("utf-8"))
+        except UnicodeEncodeError as exc:
+            raise BytecodeError("string constant bukan UTF-8 valid") from exc
+        if size > MAX_STRING:
             raise BytecodeError("string constant terlalu besar")
         return value
     raise BytecodeError("tipe constant QVM tidak didukung")
@@ -79,6 +83,15 @@ def _validate(program):
     return program
 
 
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise BytecodeError("kunci JSON QVM duplikat")
+        result[key] = value
+    return result
+
+
 def encode(program):
     _validate(program)
     try:
@@ -86,7 +99,7 @@ def encode(program):
             program, ensure_ascii=False, allow_nan=False,
             sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
-    except (TypeError, ValueError, OverflowError) as exc:
+    except (TypeError, ValueError, OverflowError, UnicodeError) as exc:
         raise BytecodeError("program QVM tidak dapat diserialisasi") from exc
     if len(body) > MAX_BYTECODE:
         raise BytecodeError("bytecode QVM terlalu besar")
@@ -108,7 +121,9 @@ def decode(data):
     if not hmac.compare_digest(actual, digest):
         raise BytecodeError("checksum QVM tidak cocok")
     try:
-        program = json.loads(body)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        program = json.loads(body, object_pairs_hook=_unique_object)
+    except BytecodeError:
+        raise
+    except (UnicodeDecodeError, ValueError) as exc:
         raise BytecodeError("payload QVM tidak valid") from exc
     return _validate(program)
