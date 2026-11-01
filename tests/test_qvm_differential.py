@@ -78,7 +78,8 @@ class DifferentialQVMTests(unittest.TestCase):
             "nil", "true", "false", "7", "1.5", '"qich"',
             "1 + 2 * 3", "9 / 3", "10 % 4", "-5",
             "1 < 2", "2 <= 2", "3 > 2", "3 >= 3",
-            "true == 1", "1 == 1.0", "!false", '"q" * 3',\n            "false && (1 / 0 > 0)", "true || (1 / 0 > 0)",
+            "true == 1", "1 == 1.0", "!false", '"q" * 3',
+            "false && (1 / 0 > 0)", "true || (1 / 0 > 0)",
             '"qi" + "ch"', "true ? 7 : 9", "false ? 7 : 9",
         ]
         for source in corpus:
