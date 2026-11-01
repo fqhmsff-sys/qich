@@ -28,6 +28,17 @@ def reference_expr(node, env):
         return -value
     if isinstance(node, A.Binary):
         left = reference_expr(node.left, env)
+        if node.op in ("&&", "||"):
+            if type(left) is not bool:
+                raise TypeError("bool required")
+            if node.op == "&&" and not left:
+                return False
+            if node.op == "||" and left:
+                return True
+            right = reference_expr(node.right, env)
+            if type(right) is not bool:
+                raise TypeError("bool required")
+            return right
         right = reference_expr(node.right, env)
         if node.op == "==":
             return q_eq(left, right)
@@ -67,7 +78,7 @@ class DifferentialQVMTests(unittest.TestCase):
             "nil", "true", "false", "7", "1.5", '"qich"',
             "1 + 2 * 3", "9 / 3", "10 % 4", "-5",
             "1 < 2", "2 <= 2", "3 > 2", "3 >= 3",
-            "true == 1", "1 == 1.0", "!false", '"q" * 3',
+            "true == 1", "1 == 1.0", "!false", '"q" * 3',\n            "false && (1 / 0 > 0)", "true || (1 / 0 > 0)",
             '"qi" + "ch"', "true ? 7 : 9", "false ? 7 : 9",
         ]
         for source in corpus:
