@@ -124,6 +124,6 @@ def decode(data):
         program = json.loads(body, object_pairs_hook=_unique_object)
     except BytecodeError:
         raise
-    except (UnicodeDecodeError, ValueError) as exc:
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise BytecodeError("payload QVM tidak valid") from exc
     return _validate(program)
