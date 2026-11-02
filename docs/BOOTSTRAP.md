@@ -13,7 +13,7 @@ Qich tidak akan berpura-pura "mandiri" hanya karena interpreter diganti bahasa i
 
 ## Status implementasi
 
-- QVM1 sudah memiliki envelope bytecode versioned, deterministik, checksum, validasi opcode/operand, dan batas resource.
+- QVM1 sudah memiliki envelope bytecode versioned, deterministik, checksum, validasi opcode/operand, dan batas resource. Decoder juga menolak duplicate JSON keys, invalid Unicode, float non-finite, integer terlalu besar, serta nesting JSON berlebihan tanpa membocorkan RecursionError.
 - Reference stack executor QVM1 sudah tersedia untuk mengunci semantik ISA dasar dan memiliki step/stack budget. Executor ini masih Python dan karena itu **belum** memenuhi milestone native bootstrap.
 - Compiler subset Qich AST -> QVM1 mendukung literal, unary dasar, arithmetic/comparison, ternary, short-circuit `&&`/`||`, expression statements, serta local state (`let`, lookup, assignment sederhana). Anotasi tipe dan syntax lain yang belum dikonformansikan ditolak tertutup.
 - QVM reference executor memvalidasi boolean secara ketat, menyamakan equality dengan aturan Qich (bool tidak disamakan dengan angka), membatasi ukuran integer/string, dan menolak float non-finite.
