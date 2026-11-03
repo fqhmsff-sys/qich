@@ -36,7 +36,7 @@ function enc(v) {
   }
   if (Array.isArray(v)) return { t: 'a', v: v.map(enc) };
   if (Buffer.isBuffer(v)) return { t: 'b', v: v.toString('base64') };
-  if (v && isData(v, 0)) { const o = {}; for (const k of Object.keys(v)) o[k] = enc(v[k]); return { t: 'o', v: o }; }
+  if (v && isData(v, 0)) { const o = Object.create(null); for (const k of Object.keys(v)) o[k] = enc(v[k]); return { t: 'o', v: o }; }
   const id = nid++; H.set(id, v); return { t: 'h', id, k: ty === 'function' ? 'fn' : 'obj' };
 }
 function dec(a) {
@@ -71,14 +71,18 @@ async function handle(r) {
   }
   throw new Error('op tidak dikenal');
 }
-const rl = readline.createInterface({ input: process.stdin });
-let chain = Promise.resolve();
-rl.on('line', (line) => {
-  chain = chain.then(async () => {
-    let r;
-    try { r = JSON.parse(line); } catch (e) { return; }
-    try { process.stdout.write(JSON.stringify({ rid: r.rid, ok: true, r: await handle(r) }) + '\n'); }
-    catch (e) { process.stdout.write(JSON.stringify({ rid: r.rid, ok: false, e: String(e && e.message || e) }) + '\n'); }
+module.exports = { isData, enc, dec, safeMemberName };
+
+if (require.main === module) {
+  const rl = readline.createInterface({ input: process.stdin });
+  let chain = Promise.resolve();
+  rl.on('line', (line) => {
+    chain = chain.then(async () => {
+      let r;
+      try { r = JSON.parse(line); } catch (e) { return; }
+      try { process.stdout.write(JSON.stringify({ rid: r.rid, ok: true, r: await handle(r) }) + '\n'); }
+      catch (e) { process.stdout.write(JSON.stringify({ rid: r.rid, ok: false, e: String(e && e.message || e) }) + '\n'); }
+    });
   });
-});
-rl.on('close', () => process.exit(0));
+  rl.on('close', () => process.exit(0));
+}
