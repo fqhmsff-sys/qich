@@ -5,7 +5,7 @@ import unittest
 
 from qich.compiler import parse
 from qich.qvm.bytecode import (
-    BytecodeError, MAGIC, MAX_INTEGER_BITS, MAX_STRING, decode, encode,
+    BytecodeError, MAGIC, MAX_INTEGER_BITS, MAX_STACK, MAX_STRING, decode, encode,
 )
 from qich.qvm.compiler import CompileError, compile_program
 from qich.qvm.vm import VMError, execute
@@ -98,9 +98,41 @@ class QVMExecutorTests(unittest.TestCase):
         }
         self.assertEqual(execute(program), "right")
 
-    def test_stack_underflow_is_rejected(self):
-        with self.assertRaises(VMError):
+    def test_static_stack_underflow_is_rejected(self):
+        with self.assertRaises(BytecodeError):
             execute({"constants": [], "code": [["POP"], ["HALT"]]})
+
+    def test_control_flow_join_requires_equal_stack_height(self):
+        program = {
+            "constants": [True, 1],
+            "code": [
+                ["CONST", 0], ["JUMP_IF_FALSE", 4],
+                ["CONST", 1], ["JUMP", 5],
+                ["JUMP", 5], ["HALT"],
+            ],
+        }
+        with self.assertRaises(BytecodeError):
+            encode(program)
+
+    def test_stack_growth_loop_is_rejected(self):
+        program = {"constants": [1], "code": [["CONST", 0], ["JUMP", 0]]}
+        with self.assertRaises(BytecodeError):
+            encode(program)
+
+    def test_static_stack_ceiling_is_enforced(self):
+        program = {
+            "constants": [1],
+            "code": [["CONST", 0]] * (MAX_STACK + 1) + [["HALT"]],
+        }
+        with self.assertRaises(BytecodeError):
+            encode(program)
+
+    def test_dup_has_correct_static_stack_effect(self):
+        program = {
+            "constants": [7],
+            "code": [["CONST", 0], ["DUP"], ["ADD"], ["HALT"]],
+        }
+        self.assertEqual(execute(program), 14)
 
     def test_step_budget_stops_infinite_loop(self):
         with self.assertRaises(VMError):
