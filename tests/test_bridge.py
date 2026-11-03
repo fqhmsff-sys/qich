@@ -24,6 +24,25 @@ class Bridge(unittest.TestCase):
         self.assertEqual(out.split("\n"), ["a/b y.txt", "n-5", "b", ""])
 
     @unittest.skipUnless(shutil.which("node"), "node tidak tersedia")
+    def test_javascript_bridge_preserves_proto_key_without_prototype_mutation(self):
+        helper = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "..", "src", "qich", "bridge", "js_helper.js"
+        ))
+        script = r"""
+const { enc, dec, safeMemberName } = require(process.argv[1]);
+const input = JSON.parse('{"__proto__":{"polluted":true},"safe":1}');
+const encoded = enc(input);
+if (Object.getPrototypeOf(encoded.v) !== null) process.exit(2);
+if (!Object.prototype.hasOwnProperty.call(encoded.v, "__proto__")) process.exit(3);
+const decoded = dec(encoded);
+if (Object.getPrototypeOf(decoded) !== null) process.exit(4);
+if (!Object.prototype.hasOwnProperty.call(decoded, "__proto__")) process.exit(5);
+if (Object.prototype.polluted !== undefined) process.exit(6);
+if (safeMemberName("__proto__")) process.exit(7);
+"""
+        subprocess.check_call(["node", "-e", script, helper])
+
+    @unittest.skipUnless(shutil.which("node"), "node tidak tersedia")
     def test_javascript_errors_and_isolation(self):
         # Bridge Node bukan sandbox OS. Modul dengan filesystem/network/process
         # harus fail-closed. Dulu test ini justru mengharapkan fs bisa dipakai,
