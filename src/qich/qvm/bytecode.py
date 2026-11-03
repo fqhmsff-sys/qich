@@ -14,6 +14,7 @@ MAX_CONSTANTS = 100_000
 MAX_INSTRUCTIONS = 100_000
 MAX_STRING = 1024 * 1024
 MAX_INTEGER_BITS = 13_000
+MAX_STACK = 65_536
 
 # Capability-free instruction set. New operations require conformance tests.
 OPCODES = frozenset({
@@ -50,6 +51,70 @@ def _constant(value):
     raise BytecodeError("tipe constant QVM tidak didukung")
 
 
+
+def _verify_stack(code):
+    """Verify stack depth on every reachable control-flow path."""
+    if not code:
+        return
+
+    heights = {0: 0}
+    pending = [0]
+    binary = {
+        "ADD", "SUB", "MUL", "DIV", "MOD",
+        "EQ", "NE", "LT", "LE", "GT", "GE",
+    }
+
+    def enqueue(target, height):
+        previous = heights.get(target)
+        if previous is None:
+            heights[target] = height
+            pending.append(target)
+        elif previous != height:
+            raise BytecodeError(
+                "tinggi stack QVM tidak konsisten pada pc %d" % target
+            )
+
+    while pending:
+        pc = pending.pop()
+        if pc == len(code):
+            continue
+
+        height = heights[pc]
+        op = code[pc][0]
+        if op in ("CONST", "LOAD_LOCAL"):
+            required, delta = 0, 1
+        elif op in ("POP", "STORE_LOCAL", "JUMP_IF_FALSE"):
+            required, delta = 1, -1
+        elif op == "DUP":
+            required, delta = 1, 1
+        elif op in binary:
+            required, delta = 2, -1
+        elif op in ("NOT", "NEG"):
+            required, delta = 1, 0
+        else:
+            required, delta = 0, 0
+
+        if height < required:
+            raise BytecodeError(
+                "stack underflow QVM pada pc %d (%s)" % (pc, op)
+            )
+        next_height = height + delta
+        if next_height > MAX_STACK:
+            raise BytecodeError(
+                "batas stack statis QVM terlampaui pada pc %d" % pc
+            )
+
+        if op == "HALT":
+            continue
+        if op == "JUMP":
+            enqueue(code[pc][1], next_height)
+        elif op == "JUMP_IF_FALSE":
+            enqueue(code[pc][1], next_height)
+            enqueue(pc + 1, next_height)
+        else:
+            enqueue(pc + 1, next_height)
+
+
 def _validate(program):
     if type(program) is not dict or set(program) != {"constants", "code"}:
         raise BytecodeError("struktur program QVM tidak valid")
@@ -80,6 +145,7 @@ def _validate(program):
             raise BytecodeError("indeks constant QVM di luar batas")
         if op in ("JUMP", "JUMP_IF_FALSE") and not 0 <= ins[1] <= len(code):
             raise BytecodeError("target jump QVM di luar batas")
+    _verify_stack(code)
     return program
 
 
