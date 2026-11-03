@@ -87,7 +87,10 @@ def execute(program, *, max_steps=DEFAULT_MAX_STEPS, max_stack=DEFAULT_MAX_STACK
     A jump may target one instruction past the end to terminate cleanly.
     Positive step and stack budgets are mandatory.
     """
-    _validate(program)
+    try:
+        _validate(program)
+    except BytecodeError as exc:
+        raise VMError("bytecode QVM tidak valid") from exc
     if type(max_steps) is not int or isinstance(max_steps, bool) or max_steps <= 0:
         raise VMError("max_steps QVM harus integer positif")
     if type(max_stack) is not int or isinstance(max_stack, bool) or max_stack <= 0:
