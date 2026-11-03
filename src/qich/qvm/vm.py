@@ -2,12 +2,12 @@
 import math
 
 from .bytecode import (
-    BytecodeError, MAX_INTEGER_BITS, MAX_STRING, _validate,
+    BytecodeError, MAX_INTEGER_BITS, MAX_STACK, MAX_STRING, _validate,
 )
 from ..runtime.values import q_eq
 
 DEFAULT_MAX_STEPS = 1_000_000
-DEFAULT_MAX_STACK = 65_536
+DEFAULT_MAX_STACK = MAX_STACK
 
 
 class VMError(RuntimeError):
