@@ -99,7 +99,7 @@ class QVMExecutorTests(unittest.TestCase):
         self.assertEqual(execute(program), "right")
 
     def test_static_stack_underflow_is_rejected(self):
-        with self.assertRaises(BytecodeError):
+        with self.assertRaises(VMError):
             execute({"constants": [], "code": [["POP"], ["HALT"]]})
 
     def test_control_flow_join_requires_equal_stack_height(self):
