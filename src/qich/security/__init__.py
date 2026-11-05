@@ -32,9 +32,9 @@ def _zip_member_path(name):
     import stat
     import unicodedata
 
-    if not isinstance(name, str) or not name or "\\x00" in name:
+    if not isinstance(name, str) or not name or "\x00" in name:
         raise ValueError("nama file arsip kosong atau tidak valid")
-    normalized = unicodedata.normalize("NFC", name.replace("\\\\", "/"))
+    normalized = unicodedata.normalize("NFC", name.replace("\\", "/"))
     is_dir = normalized.endswith("/")
     if is_dir:
         normalized = normalized[:-1]
