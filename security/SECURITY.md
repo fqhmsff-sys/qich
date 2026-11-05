@@ -14,7 +14,7 @@ Setiap baris punya test (`tests/test_security.py`, `test_packages.py`, `test_chy
 | Jaringan klien | skema dibatasi, HTTP non-loopback ditolak, redirect https→http ditolak, TLS verifikasi default, batas ukuran | http_client_defaults |
 | Server `chyb` | bind 127.0.0.1, batas body, header keamanan, 500 tanpa detail, static anti-traversal, redirect/header injection diblokir, request malformed | tests chyb |
 | Model tak tepercaya | JSON ter-skema (bukan pickle), validasi dimensi/finite/aktivasi/batas parameter | untrusted_model_rejected |
-| Supply chain | checksum paket & arsip, `qh.lock` mengunci sumber (dependency confusion), nama cadangan, typosquatting, ekstraksi ZIP menolak traversal/ADS/nama perangkat/collision dan memakai streaming berbatas, tanpa install-script, `qh audit` memakai advisory registry | tests packages, zip path regressions |
+| Supply chain | checksum paket & arsip, `qh.lock` mengunci sumber (dependency confusion), nama cadangan, typosquatting, ekstraksi ZIP menolak traversal/ADS/nama perangkat/collision dan memakai streaming berbatas, tanpa install-script, `qh audit` memakai advisory registry | tests/test_packages.py, tests/test_security.py |
 
 **Belum ada (jujur):** signed releases (PLANNED), isolasi proses untuk `py:` (in-process, bukan sandbox), batas memori proses, registry HTTPS/TUF, fuzzing berkelanjutan (hanya suite fuzz kecil), audit pihak ketiga.
 **Melaporkan kerentanan:** buka advisory privat ke pengelola proyek; format advisory registry: `index.json → advisories → nama → [{id, summary, affected}]`.
