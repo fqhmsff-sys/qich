@@ -175,13 +175,13 @@ class QVMCompilerRegressionTests(unittest.TestCase):
         self.assertEqual(self._run("let x = 2\nx = 7\nx + 1"), 8)
 
     def test_constant_pool_deduplicates_by_type(self):
-        program = compile_program(parse("1 + 1\\ntrue == 1", "qvm-regression.qh"))
+        program = compile_program(parse("1 + 1\ntrue == 1", "qvm-regression.qh"))
         self.assertEqual(len(program["constants"]), 2)
         self.assertIs(type(program["constants"][0]), int)
         self.assertIs(type(program["constants"][1]), bool)
 
     def test_constant_pool_handles_many_unique_literals(self):
-        source = "\\n".join(str(i) for i in range(2048))
+        source = "\n".join(str(i) for i in range(2048))
         program = compile_program(parse(source, "qvm-constant-pool.qh"))
         self.assertEqual(len(program["constants"]), 2048)
 
