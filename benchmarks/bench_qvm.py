@@ -7,7 +7,7 @@ import time
 import tracemalloc
 
 from qich.compiler import parse
-from qich.qvm import compile_program, execute
+from qich.qvm import compile_program, encode, execute
 from qich.qvm.bytecode import MAX_INSTRUCTIONS
 
 
@@ -42,12 +42,25 @@ def main():
     if len(compiled["constants"]) != args.constants or execute(compiled) != expected:
         raise SystemExit("hasil benchmark QVM salah")
 
-    median = statistics.median(samples)
-    print("QVM1 compiler benchmark (Python %s)" % sys.version.split()[0])
+    runtime_samples = []
+    for _ in range(args.repeat):
+        started = time.perf_counter()
+        actual = execute(compiled)
+        runtime_samples.append(time.perf_counter() - started)
+        if actual != expected:
+            raise SystemExit("hasil eksekusi QVM berubah selama benchmark")
+
+    compile_median = statistics.median(samples)
+    runtime_median = statistics.median(runtime_samples)
+    artifact_size = len(encode(compiled))
+    print("QVM1 compiler/runtime benchmark (Python %s)" % sys.version.split()[0])
     print("unique constants : %s" % format(args.constants, ","))
     print("parse            : %.2f ms" % parse_ms)
-    print("compile median   : %.2f ms (%d runs)" % (median * 1000, args.repeat))
-    print("constants/sec    : %.0f" % (args.constants / median))
+    print("compile median   : %.2f ms (%d runs)" % (compile_median * 1000, args.repeat))
+    print("constants/sec    : %.0f" % (args.constants / compile_median))
+    print("runtime median   : %.2f ms (%d runs)" % (runtime_median * 1000, args.repeat))
+    print("QVM instructions/sec : %.0f" % (len(compiled["code"]) / runtime_median))
+    print("bytecode artifact: %s bytes" % format(artifact_size, ","))
     print("compile peak     : %s bytes (tracemalloc)" % format(peak_bytes, ","))
 
 
