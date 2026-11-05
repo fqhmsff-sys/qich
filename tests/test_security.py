@@ -145,5 +145,54 @@ class Security(unittest.TestCase):
         with self.assertRaises(QE): run('use c:ffi\nffi.open("/tmp/x.so")')
 
 
+    def test_zip_rejects_windows_ads_device_names_and_ambiguous_paths(self):
+        bad_names = (
+            "C:/escape.txt",
+            "dir/file.txt:secret",
+            "NUL.txt",
+            "dir/CON",
+            "trailing./file.qh",
+            "dir/./file.qh",
+            "dir//file.qh",
+        )
+        for name in bad_names:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as d:
+                with self.assertRaises(ValueError):
+                    safe_extract_zip(self._zip_one(name), d)
+
+    def _zip_one(self, name):
+        b = io.BytesIO()
+        with zipfile.ZipFile(b, "w") as archive:
+            archive.writestr(name, b"payload")
+        return b.getvalue()
+
+    def test_zip_rejects_casefold_and_separator_collisions(self):
+        b = io.BytesIO()
+        with zipfile.ZipFile(b, "w") as archive:
+            archive.writestr("pkg/file.qh", b"one")
+            archive.writestr("PKG\\\\FILE.QH", b"two")
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(ValueError):
+                safe_extract_zip(b.getvalue(), d)
+
+    def test_zip_rejects_file_directory_conflicts(self):
+        b = io.BytesIO()
+        with zipfile.ZipFile(b, "w") as archive:
+            archive.writestr("pkg", b"file")
+            archive.writestr("pkg/module.qh", b"child")
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(ValueError):
+                safe_extract_zip(b.getvalue(), d)
+
+    def test_zip_normalizes_backslash_separators(self):
+        b = io.BytesIO()
+        with zipfile.ZipFile(b, "w") as archive:
+            archive.writestr("pkg\\\\module.qh", b"source")
+        with tempfile.TemporaryDirectory() as d:
+            safe_extract_zip(b.getvalue(), d)
+            with open(os.path.join(d, "pkg", "module.qh"), "rb") as f:
+                self.assertEqual(f.read(), b"source")
+
+
 if __name__ == "__main__":
     unittest.main()
