@@ -52,7 +52,7 @@ def _zip_member_path(name):
         # Colon also rejects NTFS alternate data streams and drive-like segments.
         if ":" in part or part != part.rstrip(" ."):
             raise ValueError(f"komponen path tidak portabel: {name!r}")
-        stem = part.split(".", 1)[0].upper()
+        stem = part.split(".", 1)[0].rstrip(" .").upper()
         if stem in reserved:
             raise ValueError(f"nama perangkat Windows tidak diizinkan: {name!r}")
 
