@@ -21,16 +21,21 @@ _UNARY = {"-": "NEG", "!": "NOT", "not": "NOT"}
 class _Compiler:
     def __init__(self):
         self.constants = []
+        self.constant_indexes = {}
         self.code = []
         self.locals = {}
 
     def const(self, value):
-        # Reuse constants where equality and type agree. bool must not alias int.
-        for i, old in enumerate(self.constants):
-            if type(old) is type(value) and old == value:
-                return i
-        self.constants.append(value)
-        return len(self.constants) - 1
+        # Primitive QVM constants are hashable. Include the exact type so bool
+        # never aliases int; dictionary lookup avoids quadratic pool scans.
+        key = (type(value), value)
+        try:
+            return self.constant_indexes[key]
+        except KeyError:
+            index = len(self.constants)
+            self.constants.append(value)
+            self.constant_indexes[key] = index
+            return index
 
     def emit(self, op, arg=None):
         self.code.append([op] if arg is None else [op, arg])
