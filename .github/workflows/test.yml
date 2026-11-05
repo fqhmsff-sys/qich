@@ -69,6 +69,10 @@ jobs:
           qh bridges
       - name: Benchmark interpreter smoke test
         run: python benchmarks/bench_runtime.py --iterations 10000 --repeat 3
+      - name: Benchmark QVM compiler smoke test
+        env:
+          PYTHONPATH: src
+        run: python benchmarks/bench_qvm.py --constants 1000 --repeat 3
       - name: Create and run a fresh project
         run: |
           qh new ci-smoke
