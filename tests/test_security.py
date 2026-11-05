@@ -150,6 +150,7 @@ class Security(unittest.TestCase):
             "C:/escape.txt",
             "dir/file.txt:secret",
             "NUL.txt",
+            "NUL .txt",
             "dir/CON",
             "trailing./file.qh",
             "dir/./file.qh",
