@@ -2,6 +2,9 @@
 import io
 import os
 import re
+import stat
+import tempfile
+import unicodedata
 import zipfile
 
 PY_DENY = {"os", "sys", "subprocess", "ctypes", "shutil", "socket", "importlib", "builtins",
@@ -29,9 +32,6 @@ class Policy:
 
 def _zip_member_path(name):
     """Return a portable canonical path and directory flag for one ZIP member."""
-    import stat
-    import unicodedata
-
     if not isinstance(name, str) or not name or "\x00" in name:
         raise ValueError("nama file arsip kosong atau tidak valid")
     normalized = unicodedata.normalize("NFC", name.replace("\\", "/"))
@@ -72,9 +72,6 @@ def _within_directory(base, path):
 
 def safe_extract_zip(data: bytes, dest: str, max_files=2000, max_total=100 * 1024 * 1024):
     """Ekstraksi ZIP dengan path portable, collision checks, dan I/O berbatas."""
-    import stat
-    import tempfile
-
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
         infos = zf.infolist()
         if len(infos) > max_files:
