@@ -170,7 +170,7 @@ class Security(unittest.TestCase):
         b = io.BytesIO()
         with zipfile.ZipFile(b, "w") as archive:
             archive.writestr("pkg/file.qh", b"one")
-            archive.writestr("PKG\\\\FILE.QH", b"two")
+            archive.writestr("PKG\\FILE.QH", b"two")
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(ValueError):
                 safe_extract_zip(b.getvalue(), d)
@@ -187,7 +187,7 @@ class Security(unittest.TestCase):
     def test_zip_normalizes_backslash_separators(self):
         b = io.BytesIO()
         with zipfile.ZipFile(b, "w") as archive:
-            archive.writestr("pkg\\\\module.qh", b"source")
+            archive.writestr("pkg\\module.qh", b"source")
         with tempfile.TemporaryDirectory() as d:
             safe_extract_zip(b.getvalue(), d)
             with open(os.path.join(d, "pkg", "module.qh"), "rb") as f:
