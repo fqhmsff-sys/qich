@@ -12,7 +12,8 @@ Legenda: **TESTED** = ada test otomatis yang lulus di lingkungan pengembangan (L
 | Pattern matching, Result + `?`, try/catch/throw, async/await (thread) | TESTED | |
 | Modul `use mod:`/`pkg:`, impor melingkar terdeteksi | TESTED | |
 | Compiler → `.qhc` (AST ter-serialisasi + SHA-256, diverifikasi saat load) | TESTED | **bukan** bytecode VM atau native; lihat DECISIONS |
-| Bytecode VM, kompilasi native, GC sendiri | PLANNED | memori dikelola Python (aman: tanpa UB, indeks dicek) |
+| QVM1 bytecode versioned + reference stack executor | EXPERIMENTAL | compiler subset AST → QVM1 dan executor tersedia; masih berjalan di Python; lihat BOOTSTRAP.md |
+| Native compiler/runtime, self-hosted compiler, GC sendiri | PLANNED | toolchain mandiri belum tersedia; memori reference runtime masih dikelola Python |
 | Core compiler/runtime dalam Rust | PLANNED / UNAVAILABLE di sandbox | tidak ada `rustc` di lingkungan pengembangan; implementasi referensi ini ditulis Python |
 | Formatter (indentasi + spasi, idempoten, menjaga komentar), `qh doc` | TESTED | formatter berbasis baris, bukan pretty-printer AST |
 
