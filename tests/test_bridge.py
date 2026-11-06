@@ -99,7 +99,7 @@ if (safeMemberName("x".repeat(257))) process.exit(8);
 const { enc, MAX_HANDLES } = require(process.argv[1]);
 const cycle = []; cycle.push(cycle);
 if (typeof JSON.stringify(enc(cycle)) !== "string") process.exit(2);
-for (let i = 0; i < MAX_HANDLES; i++) enc(() => {});
+for (let i = 0; i < MAX_HANDLES - 1; i++) enc(() => {});
 try {
   enc(() => {});
   process.exit(3);
