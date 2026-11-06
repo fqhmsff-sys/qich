@@ -45,9 +45,12 @@ def _zip_member_path(name):
     if any(part in ("", ".", "..") for part in parts):
         raise ValueError(f"segmen path berbahaya di arsip: {name!r}")
 
-    reserved = {"CON", "PRN", "AUX", "NUL"}
+    reserved = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
     reserved.update(f"COM{i}" for i in range(1, 10))
     reserved.update(f"LPT{i}" for i in range(1, 10))
+    # Windows also reserves the superscript 1/2/3 device-name spellings.
+    reserved.update(f"COM{x}" for x in ("¹", "²", "³"))
+    reserved.update(f"LPT{x}" for x in ("¹", "²", "³"))
     for part in parts:
         # Colon also rejects NTFS alternate data streams and drive-like segments.
         if ":" in part or part != part.rstrip(" ."):

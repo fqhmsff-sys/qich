@@ -155,6 +155,14 @@ class Security(unittest.TestCase):
             "trailing./file.qh",
             "dir/./file.qh",
             "dir//file.qh",
+            "COM¹.txt",
+            "COM²",
+            "COM³.log",
+            "LPT¹",
+            "LPT².txt",
+            "LPT³",
+            "CONIN$",
+            "CONOUT$.log",
         )
         for name in bad_names:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as d:
