@@ -9,6 +9,10 @@ from ..compiler.diagnostics import QichError
 from .manifest import RESERVED, NAME_RE
 from .lock import SKIP
 
+MAX_INDEX_BYTES = 16 * 1024 * 1024
+MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
+MAX_VERSION_COMPONENT_DIGITS = 9
+
 
 def _vt(v): return tuple(int(x) for x in v.split("."))
 
@@ -43,29 +47,62 @@ def similar_names(name, names):
 def index_path(reg): return os.path.join(reg, "index.json")
 
 
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("kunci JSON registry duplikat")
+        result[key] = value
+    return result
+
+
 def load_index(reg):
     try:
-        with open(index_path(reg), encoding="utf-8") as f: idx = json.load(f)
+        with open(index_path(reg), "rb") as f:
+            raw = f.read(MAX_INDEX_BYTES + 1)
     except FileNotFoundError:
         raise QichError(f"registry '{reg}' tidak punya index.json", "RegistryError", "P0100")
+    except OSError as exc:
+        raise QichError("index registry tidak dapat dibaca", "RegistryError", "P0101") from exc
+    if len(raw) > MAX_INDEX_BYTES:
+        raise QichError("index registry melampaui batas ukuran", "ResourceLimit", "P0101")
+    try:
+        idx = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object)
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+        raise QichError("index registry tidak valid", "RegistryError", "P0101") from exc
     if not isinstance(idx, dict) or not isinstance(idx.get("packages"), dict):
         raise QichError("index registry tidak valid", "RegistryError", "P0101")
     return idx
 
-
 def resolve(reg, name, spec):
     idx = load_index(reg)
     p = idx["packages"].get(name)
-    if not p or not p.get("versions"):
+    if not isinstance(p, dict) or not isinstance(p.get("versions"), dict) or not p["versions"]:
         raise QichError(f"paket '{name}' tidak ada di registry", "RegistryError", "P0102")
-    vs = [v for v in p["versions"] if re.match(r"^\d+\.\d+\.\d+$", v) and not p["versions"][v].get("yanked")]
+
+    vs = []
+    for version, metadata in p["versions"].items():
+        if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version):
+            continue
+        if any(len(part) > MAX_VERSION_COMPONENT_DIGITS for part in version.split(".")):
+            continue
+        if not isinstance(metadata, dict):
+            raise QichError(f"metadata versi '{version}' tidak valid", "RegistryError", "P0101")
+        yanked = metadata.get("yanked", False)
+        if type(yanked) is not bool:
+            raise QichError(f"status yanked versi '{version}' tidak valid", "RegistryError", "P0101")
+        if not yanked:
+            vs.append(version)
+
     spec = (spec or "*").strip()
     if spec in ("*", ""):
         cand = vs
     elif spec.startswith("^"):
         raw = spec[1:]
         parts = raw.split(".")
-        if not 1 <= len(parts) <= 3 or any(not x.isdigit() for x in parts):
+        if not 1 <= len(parts) <= 3 or any(
+            not re.fullmatch(r"\d{1,%d}" % MAX_VERSION_COMPONENT_DIGITS, x) for x in parts
+        ):
             raise QichError(f"rentang versi tidak valid: '{spec}'", "RegistryError", "P0104")
         parts += ["0"] * (3 - len(parts))
         base = tuple(int(x) for x in parts)
@@ -78,19 +115,40 @@ def resolve(reg, name, spec):
         cand = [v for v in vs if base <= _vt(v) < upper]
     else:
         cand = [v for v in vs if v == spec]
+
     if not cand:
         raise QichError(f"tidak ada versi '{name}' yang cocok dengan '{spec}'", "RegistryError", "P0103")
-    v = max(cand, key=_vt)
-    return v, p["versions"][v]
-
+    version = max(cand, key=_vt)
+    return version, p["versions"][version]
 
 def fetch(reg, name, version, entry):
-    path = os.path.join(reg, os.path.basename(entry["file"]))
-    with open(path, "rb") as f: data = f.read()
-    if hashlib.sha256(data).hexdigest() != entry["sha256"]:
+    if not isinstance(entry, dict):
+        raise QichError(f"metadata arsip {name}-{version} tidak valid", "RegistryError", "P0110")
+    filename = entry.get("file")
+    digest = entry.get("sha256")
+    if (
+        not isinstance(filename, str) or not filename or len(filename) > 255
+        or filename in (".", "..") or os.path.basename(filename) != filename
+        or "/" in filename or "\\" in filename
+    ):
+        raise QichError("nama file arsip registry tidak aman", "SecurityError", "P0111")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise QichError("checksum arsip registry tidak valid", "RegistryError", "P0110")
+
+    root = os.path.realpath(reg)
+    path = os.path.join(root, filename)
+    if os.path.islink(path) or os.path.dirname(os.path.realpath(path)) != root:
+        raise QichError("file arsip registry tidak boleh berupa symlink/keluar dari registry", "SecurityError", "P0111")
+    try:
+        with open(path, "rb") as f:
+            data = f.read(MAX_ARCHIVE_BYTES + 1)
+    except OSError as exc:
+        raise QichError(f"arsip {name}-{version} tidak dapat dibaca", "RegistryError", "P0110") from exc
+    if len(data) > MAX_ARCHIVE_BYTES:
+        raise QichError("arsip registry melampaui batas ukuran", "ResourceLimit", "P0111")
+    if hashlib.sha256(data).hexdigest() != digest:
         raise QichError(f"checksum arsip {name}-{version} tidak cocok dengan index registry", "IntegrityError", "P0110")
     return data
-
 
 def check_add(reg, name, allow_similar=False):
     if name in RESERVED:
@@ -128,7 +186,9 @@ def publish(pkg_dir, name, version, reg):
                 if fn in SKIP or os.path.islink(p): continue
                 z.write(p, os.path.relpath(p, pkg_dir).replace(os.sep, "/"))
     data = buf.getvalue(); fname = f"{name}-{version}.qhpkg"
-    with open(os.path.join(reg, fname), "wb") as f: f.write(data)
+    if len(data) > MAX_ARCHIVE_BYTES:
+        raise QichError("arsip paket melampaui batas ukuran registry", "ResourceLimit", "P0131")
+    with open(os.path.join(reg, fname), "xb") as f: f.write(data)
     ex["versions"][version] = {"file": fname, "sha256": hashlib.sha256(data).hexdigest()}
     with open(index_path(reg), "w", encoding="utf-8") as f: json.dump(idx, f, indent=2, sort_keys=True)
     return fname

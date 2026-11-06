@@ -1,4 +1,4 @@
-import json, os, shutil, tempfile, unittest
+import hashlib, json, os, shutil, tempfile, unittest
 from helpers import qh, ROOT
 from qich.package import registry
 from qich.compiler.diagnostics import QichError
@@ -92,6 +92,54 @@ class Packages(unittest.TestCase):
         app = self.proj(); p = qh(["add", "--path", "../a", "pa"], app)
         self.assertNotEqual(p.returncode, 0); self.assertIn("melingkar", p.stderr)
 
+
+    def test_registry_index_is_bounded_and_rejects_duplicate_keys(self):
+        os.makedirs(self.reg, exist_ok=True)
+        old_limit = registry.MAX_INDEX_BYTES
+        try:
+            registry.MAX_INDEX_BYTES = 64
+            with open(os.path.join(self.reg, "index.json"), "wb") as f:
+                f.write(b" " * 65)
+            with self.assertRaises(QichError) as c:
+                registry.load_index(self.reg)
+            self.assertEqual(c.exception.kind, "ResourceLimit")
+
+            registry.MAX_INDEX_BYTES = 1024
+            with open(os.path.join(self.reg, "index.json"), "wb") as f:
+                f.write(b'{"packages":{},"packages":{}}')
+            with self.assertRaises(QichError):
+                registry.load_index(self.reg)
+        finally:
+            registry.MAX_INDEX_BYTES = old_limit
+
+    def test_registry_archive_size_and_path_are_bounded(self):
+        os.makedirs(self.reg, exist_ok=True)
+        archive = os.path.join(self.reg, "demo-1.0.0.qhpkg")
+        with open(archive, "wb") as f:
+            f.write(b"0123456789")
+        old_limit = registry.MAX_ARCHIVE_BYTES
+        try:
+            registry.MAX_ARCHIVE_BYTES = 8
+            with self.assertRaises(QichError) as c:
+                registry.fetch(self.reg, "demo", "1.0.0", {
+                    "file": "demo-1.0.0.qhpkg",
+                    "sha256": hashlib.sha256(b"0123456789").hexdigest(),
+                })
+            self.assertEqual(c.exception.kind, "ResourceLimit")
+            with self.assertRaises(QichError):
+                registry.fetch(self.reg, "demo", "1.0.0", {
+                    "file": "../outside.qhpkg",
+                    "sha256": "0" * 64,
+                })
+        finally:
+            registry.MAX_ARCHIVE_BYTES = old_limit
+
+    def test_registry_rejects_malformed_version_metadata(self):
+        os.makedirs(self.reg, exist_ok=True)
+        with open(os.path.join(self.reg, "index.json"), "w", encoding="utf-8") as f:
+            json.dump({"packages": {"demo": {"versions": {"1.0.0": None}}}}, f)
+        with self.assertRaises(QichError):
+            registry.resolve(self.reg, "demo", "*")
 
     def test_caret_version_ranges_follow_semver(self):
         os.makedirs(self.reg, exist_ok=True)
