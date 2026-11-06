@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [test_language.py, test_bridge.py, test_packages.py, test_security.py, test_chyb_cli.py]
+        suite: [test_language.py, test_bridge.py, test_packages.py, test_security.py, test_security_regressions.py, test_qvm.py, test_qvm_differential.py, test_chyb_cli.py]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -69,6 +69,10 @@ jobs:
           qh bridges
       - name: Benchmark interpreter smoke test
         run: python benchmarks/bench_runtime.py --iterations 10000 --repeat 3
+      - name: Benchmark QVM compiler smoke test
+        env:
+          PYTHONPATH: src
+        run: python benchmarks/bench_qvm.py --constants 1000 --repeat 3
       - name: Create and run a fresh project
         run: |
           qh new ci-smoke

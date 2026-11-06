@@ -10,6 +10,8 @@ from ..compiler.diagnostics import QichError
 from ..runtime.values import Secret, RangeVal, Instance
 
 HELPER = os.path.join(os.path.dirname(__file__), "js_helper.js")
+MAX_RPC_BYTES = 1024 * 1024
+MAX_RPC_RESPONSE_BYTES = 1024 * 1024
 
 
 def _helper_path():
@@ -32,30 +34,58 @@ def _start():
     if not node:
         raise QichError("Node.js tidak ditemukan di PATH; adapter js: butuh 'node'", "ImportError", "R0134")
     _proc = subprocess.Popen([node, _helper_path()], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
-    atexit.register(lambda: _proc and _proc.kill())
+    proc = _proc
+    atexit.register(lambda: proc and proc.kill())
 
 
 def rpc(req, timeout=60):
     global _proc, _next
+    if type(req) is not dict:
+        raise QichError("request adapter JS harus berupa objek", "ForeignError", "R0141")
+    if type(timeout) not in (int, float) or timeout <= 0:
+        raise QichError("timeout adapter JS harus positif", "ForeignError", "R0141")
+
     with _lock:
+        _next += 1
+        request = dict(req)
+        request["rid"] = _next
+        try:
+            payload = json.dumps(
+                request, ensure_ascii=True, allow_nan=False, separators=(",", ":")
+            )
+        except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+            raise QichError("request adapter JS tidak dapat diserialisasi", "ForeignError", "R0141") from exc
+        if len(payload.encode("utf-8")) > MAX_RPC_BYTES:
+            raise QichError("request adapter JS melampaui batas ukuran", "ResourceLimit", "R0141")
+
         if _proc is None or _proc.poll() is not None:
             _start()
-        _next += 1; req["rid"] = _next
-        timer = threading.Timer(timeout, lambda: _proc.kill()); timer.start()
+        proc = _proc
+        timer = threading.Timer(timeout, proc.kill)
+        timer.start()
         try:
-            _proc.stdin.write(json.dumps(req) + "\n"); _proc.stdin.flush()
-            line = _proc.stdout.readline()
+            proc.stdin.write(payload + "\n")
+            proc.stdin.flush()
+            line = proc.stdout.readline()
         except (BrokenPipeError, OSError):
             line = ""
         finally:
             timer.cancel()
+
         if not line:
             raise QichError("proses node berhenti/timeout", "ForeignError", "R0144")
-        resp = json.loads(line)
+        if len(line.encode("utf-8")) > MAX_RPC_RESPONSE_BYTES:
+            raise QichError("respons adapter JS melampaui batas ukuran", "ResourceLimit", "R0141")
+        try:
+            resp = json.loads(line)
+        except (TypeError, ValueError) as exc:
+            raise QichError("respons protokol JS tidak valid", "ForeignError", "R0144") from exc
+        if type(resp) is not dict or resp.get("rid") != request["rid"]:
+            raise QichError("ID respons protokol JS tidak cocok", "ForeignError", "R0144")
+
     if not resp.get("ok"):
         raise QichError(resp.get("e", "kesalahan JS"), "ForeignError", "R0145")
     return resp["r"]
-
 
 def enc(x, depth=0):
     if depth > 50: raise QichError("struktur terlalu dalam", "ForeignError", "R0141")
