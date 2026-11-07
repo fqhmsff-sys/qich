@@ -172,6 +172,72 @@ class Packages(unittest.TestCase):
         w(os.path.join(app, "src", "main.qh"), 'use mod:..secret\nfn main() { }\n')
         self.assertNotEqual(qh(["run"], app).returncode, 0)
 
+    def test_registry_rejects_symlink_index_and_publish_preserves_target(self):
+        os.makedirs(self.reg, exist_ok=True)
+        outside = os.path.join(self.t, "outside-index.json")
+        original = b'{"packages":{},"marker":"must stay unchanged"}'
+        with open(outside, "wb") as stream:
+            stream.write(original)
+        index = os.path.join(self.reg, "index.json")
+        try:
+            os.symlink(outside, index)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink tidak didukung di lingkungan ini")
+
+        with self.assertRaises(QichError) as caught:
+            registry.load_index(self.reg)
+        self.assertEqual(caught.exception.kind, "SecurityError")
+
+        lib = os.path.join(self.t, "safe"); mkpkg(lib, "safe", "1.0.0", "fn f() rtrn => 1\n")
+        with self.assertRaises(QichError):
+            registry.publish(lib, "safe", "1.0.0", self.reg)
+        with open(outside, "rb") as stream:
+            self.assertEqual(stream.read(), original)
+
+    def test_publish_does_not_replace_malformed_registry_index(self):
+        os.makedirs(self.reg, exist_ok=True)
+        index = os.path.join(self.reg, "index.json")
+        original = b'{"packages":'
+        with open(index, "wb") as stream:
+            stream.write(original)
+        lib = os.path.join(self.t, "safe"); mkpkg(lib, "safe", "1.0.0", "fn f() rtrn => 1\n")
+        with self.assertRaises(QichError):
+            registry.publish(lib, "safe", "1.0.0", self.reg)
+        with open(index, "rb") as stream:
+            self.assertEqual(stream.read(), original)
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "safe-1.0.0.qhpkg")))
+
+    def test_publish_archive_limit_is_enforced_during_writing(self):
+        os.makedirs(self.reg, exist_ok=True)
+        lib = os.path.join(self.t, "large"); mkpkg(lib, "large", "1.0.0", "fn f() rtrn => 1\n")
+        with open(os.path.join(lib, "src", "random.bin"), "wb") as stream:
+            stream.write(os.urandom(4096))
+        old_limit = registry.MAX_ARCHIVE_BYTES
+        try:
+            registry.MAX_ARCHIVE_BYTES = 256
+            with self.assertRaises(QichError) as caught:
+                registry.publish(lib, "large", "1.0.0", self.reg)
+            self.assertEqual(caught.exception.kind, "ResourceLimit")
+        finally:
+            registry.MAX_ARCHIVE_BYTES = old_limit
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "large-1.0.0.qhpkg")))
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "index.json")))
+        self.assertFalse(any(name.startswith(".qich-publish-") for name in os.listdir(self.reg)))
+
+    def test_publish_rejects_symlink_package_members(self):
+        lib = os.path.join(self.t, "symlinked"); mkpkg(lib, "symlinked", "1.0.0", "fn f() rtrn => 1\n")
+        outside = os.path.join(self.t, "outside.qh")
+        with open(outside, "w", encoding="utf-8") as stream:
+            stream.write("fn outside() rtrn => 1\n")
+        try:
+            os.symlink(outside, os.path.join(lib, "src", "linked.qh"))
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink tidak didukung di lingkungan ini")
+        with self.assertRaises(QichError) as caught:
+            registry.publish(lib, "symlinked", "1.0.0", self.reg)
+        self.assertEqual(caught.exception.kind, "SecurityError")
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "symlinked-1.0.0.qhpkg")))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,9 +1,11 @@
 """Registry lokal berbasis direktori (index.json + arsip .qhpkg). Registry HTTPS: PLANNED."""
+import errno
 import hashlib
-import io
 import json
 import os
 import re
+import stat
+import tempfile
 import zipfile
 from ..compiler.diagnostics import QichError
 from .manifest import RESERVED, NAME_RE
@@ -56,23 +58,199 @@ def _unique_object(pairs):
     return result
 
 
-def load_index(reg):
+def _reject_json_constant(value):
+    raise ValueError("konstanta JSON non-finite tidak diizinkan: " + value)
+
+
+def _read_bounded_regular(path, limit, label, missing_code, error_code):
+    """Read a bounded regular file without following a leaf symlink."""
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | nofollow
     try:
-        with open(index_path(reg), "rb") as f:
-            raw = f.read(MAX_INDEX_BYTES + 1)
-    except FileNotFoundError:
-        raise QichError(f"registry '{reg}' tidak punya index.json", "RegistryError", "P0100")
+        fd = os.open(path, flags)
+    except FileNotFoundError as exc:
+        raise QichError(f"{label} tidak ditemukan", "RegistryError", missing_code) from exc
     except OSError as exc:
-        raise QichError("index registry tidak dapat dibaca", "RegistryError", "P0101") from exc
+        if exc.errno in (errno.ELOOP, errno.EMLINK):
+            raise QichError(f"{label} tidak boleh berupa symlink", "SecurityError", error_code) from exc
+        raise QichError(f"{label} tidak dapat dibaca", "RegistryError", error_code) from exc
+
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise QichError(f"{label} harus berupa file reguler", "SecurityError", error_code)
+        if not nofollow:
+            try:
+                current = os.lstat(path)
+            except OSError as exc:
+                raise QichError(f"{label} berubah saat dibuka", "SecurityError", error_code) from exc
+            if stat.S_ISLNK(current.st_mode) or not os.path.samestat(current, opened):
+                raise QichError(f"{label} tidak boleh berupa symlink atau berubah saat dibuka", "SecurityError", error_code)
+
+        stream = os.fdopen(fd, "rb")
+        fd = None
+        with stream:
+            raw = stream.read(limit + 1)
+    except QichError:
+        raise
+    except OSError as exc:
+        raise QichError(f"{label} tidak dapat dibaca", "RegistryError", error_code) from exc
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+    if len(raw) > limit:
+        raise QichError(f"{label} melampaui batas ukuran", "ResourceLimit", error_code)
+    return raw
+
+
+def _write_index_atomic(reg, idx):
+    """Replace index.json atomically; os.replace replaces a symlink itself, not its target."""
+    try:
+        raw = json.dumps(idx, indent=2, sort_keys=True, allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise QichError("index registry tidak dapat diserialisasi", "RegistryError", "P0101") from exc
     if len(raw) > MAX_INDEX_BYTES:
         raise QichError("index registry melampaui batas ukuran", "ResourceLimit", "P0101")
+
+    fd, temporary = tempfile.mkstemp(prefix=".qich-index-", dir=reg)
     try:
-        idx = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, index_path(reg))
+    except OSError as exc:
+        raise QichError("index registry tidak dapat ditulis secara atomik", "RegistryError", "P0101") from exc
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+class _BoundedWriter:
+    """Seekable ZIP output that refuses to grow beyond the configured archive limit."""
+    def __init__(self, stream, limit):
+        self.stream = stream
+        self.limit = limit
+
+    def write(self, data):
+        position = self.stream.tell()
+        self.stream.seek(0, os.SEEK_END)
+        current_size = self.stream.tell()
+        self.stream.seek(position, os.SEEK_SET)
+        if max(current_size, position + len(data)) > self.limit:
+            raise QichError("arsip paket melampaui batas ukuran registry", "ResourceLimit", "P0131")
+        return self.stream.write(data)
+
+    def tell(self):
+        return self.stream.tell()
+
+    def seek(self, offset, whence=os.SEEK_SET):
+        return self.stream.seek(offset, whence)
+
+    def flush(self):
+        return self.stream.flush()
+
+    def seekable(self):
+        return True
+
+
+def _write_package_archive(pkg_dir, registry_dir, archive_path):
+    """Build to a bounded temporary file, then create the immutable archive exclusively."""
+    try:
+        root_info = os.lstat(pkg_dir)
+    except OSError as exc:
+        raise QichError("direktori paket tidak dapat dibaca", "RegistryError", "P0131") from exc
+    if not stat.S_ISDIR(root_info.st_mode):
+        raise QichError("direktori paket harus berupa direktori nyata, bukan symlink", "SecurityError", "P0131")
+    package_root = os.path.realpath(pkg_dir)
+
+    fd, temporary = tempfile.mkstemp(prefix=".qich-publish-", suffix=".tmp", dir=registry_dir)
+    try:
+        with os.fdopen(fd, "w+b") as raw:
+            writer = _BoundedWriter(raw, MAX_ARCHIVE_BYTES)
+            with zipfile.ZipFile(writer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                for base, dirs, files in os.walk(package_root, followlinks=False):
+                    dirs[:] = sorted(name for name in dirs if name not in SKIP)
+                    for dirname in dirs:
+                        path = os.path.join(base, dirname)
+                        try:
+                            mode = os.lstat(path).st_mode
+                        except OSError as exc:
+                            raise QichError("direktori paket berubah saat dipublikasikan", "RegistryError", "P0131") from exc
+                        if not stat.S_ISDIR(mode):
+                            raise QichError("symlink atau tipe direktori khusus tidak diizinkan dalam paket", "SecurityError", "P0131")
+
+                    for filename in sorted(files):
+                        if filename in SKIP:
+                            continue
+                        path = os.path.join(base, filename)
+                        try:
+                            mode = os.lstat(path).st_mode
+                        except OSError as exc:
+                            raise QichError("file paket berubah saat dipublikasikan", "RegistryError", "P0131") from exc
+                        if not stat.S_ISREG(mode):
+                            raise QichError("symlink atau file khusus tidak diizinkan dalam paket", "SecurityError", "P0131")
+                        arcname = os.path.relpath(path, package_root).replace(os.sep, "/")
+                        archive.write(path, arcname)
+
+            raw.flush()
+            os.fsync(raw.fileno())
+            raw.seek(0)
+            digest = hashlib.sha256()
+            while True:
+                chunk = raw.read(64 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+        output_fd = os.open(archive_path, flags, 0o600)
+        try:
+            with os.fdopen(output_fd, "wb") as output, open(temporary, "rb") as source:
+                while True:
+                    chunk = source.read(64 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                output.flush()
+                os.fsync(output.fileno())
+        except Exception:
+            try:
+                os.unlink(archive_path)
+            except OSError:
+                pass
+            raise
+        return digest.hexdigest()
+    except FileExistsError as exc:
+        raise QichError("arsip versi sudah ada dan tidak boleh ditimpa", "RegistryError", "P0130") from exc
+    except QichError:
+        raise
+    except OSError as exc:
+        raise QichError("arsip paket tidak dapat dibuat atau dipublikasikan", "RegistryError", "P0131") from exc
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def load_index(reg):
+    raw = _read_bounded_regular(index_path(reg), MAX_INDEX_BYTES, "index registry", "P0100", "P0101")
+    try:
+        idx = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=_unique_object,
+            parse_constant=_reject_json_constant,
+        )
     except (UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise QichError("index registry tidak valid", "RegistryError", "P0101") from exc
-    if not isinstance(idx, dict) or not isinstance(idx.get("packages"), dict):
+    if (
+        not isinstance(idx, dict)
+        or not isinstance(idx.get("packages"), dict)
+        or ("advisories" in idx and not isinstance(idx["advisories"], dict))
+    ):
         raise QichError("index registry tidak valid", "RegistryError", "P0101")
     return idx
+
 
 def resolve(reg, name, spec):
     idx = load_index(reg)
@@ -121,13 +299,14 @@ def resolve(reg, name, spec):
     version = max(cand, key=_vt)
     return version, p["versions"][version]
 
+
 def fetch(reg, name, version, entry):
     if not isinstance(entry, dict):
         raise QichError(f"metadata arsip {name}-{version} tidak valid", "RegistryError", "P0110")
     filename = entry.get("file")
     digest = entry.get("sha256")
     if (
-        not isinstance(filename, str) or not filename or len(filename) > 255
+        not isinstance(filename, str) or not filename or "\x00" in filename or len(filename) > 255
         or filename in (".", "..") or os.path.basename(filename) != filename
         or "/" in filename or "\\" in filename
     ):
@@ -137,18 +316,13 @@ def fetch(reg, name, version, entry):
 
     root = os.path.realpath(reg)
     path = os.path.join(root, filename)
-    if os.path.islink(path) or os.path.dirname(os.path.realpath(path)) != root:
-        raise QichError("file arsip registry tidak boleh berupa symlink/keluar dari registry", "SecurityError", "P0111")
-    try:
-        with open(path, "rb") as f:
-            data = f.read(MAX_ARCHIVE_BYTES + 1)
-    except OSError as exc:
-        raise QichError(f"arsip {name}-{version} tidak dapat dibaca", "RegistryError", "P0110") from exc
-    if len(data) > MAX_ARCHIVE_BYTES:
-        raise QichError("arsip registry melampaui batas ukuran", "ResourceLimit", "P0111")
+    if os.path.dirname(os.path.realpath(path)) != root:
+        raise QichError("file arsip registry keluar dari direktori registry", "SecurityError", "P0111")
+    data = _read_bounded_regular(path, MAX_ARCHIVE_BYTES, f"arsip {name}-{version}", "P0110", "P0111")
     if hashlib.sha256(data).hexdigest() != digest:
         raise QichError(f"checksum arsip {name}-{version} tidak cocok dengan index registry", "IntegrityError", "P0110")
     return data
+
 
 def check_add(reg, name, allow_similar=False):
     if name in RESERVED:
@@ -167,39 +341,83 @@ def check_add(reg, name, allow_similar=False):
 def publish(pkg_dir, name, version, reg):
     if not NAME_RE.match(name) or name in RESERVED:
         raise QichError(f"nama paket tidak boleh dipublikasikan: {name!r}", "RegistryError", "P0120")
+    if (
+        not isinstance(version, str)
+        or not re.fullmatch(r"\d{1,%d}\.\d{1,%d}\.\d{1,%d}" % (
+            MAX_VERSION_COMPONENT_DIGITS,
+            MAX_VERSION_COMPONENT_DIGITS,
+            MAX_VERSION_COMPONENT_DIGITS,
+        ), version)
+    ):
+        raise QichError("versi paket harus berbentuk MAJOR.MINOR.PATCH dengan komponen terbatas", "RegistryError", "P0120")
+
     os.makedirs(reg, exist_ok=True)
-    try: idx = load_index(reg)
-    except QichError: idx = {"packages": {}, "advisories": {}}
-    ex = idx["packages"].setdefault(name, {"versions": {}})
-    if version in ex["versions"]:
+    reg = os.path.realpath(reg)
+    try:
+        idx = load_index(reg)
+    except QichError as exc:
+        if exc.code != "P0100":
+            raise
+        idx = {"packages": {}, "advisories": {}}
+
+    if not isinstance(idx.get("advisories", {}), dict):
+        raise QichError("metadata advisory registry tidak valid", "RegistryError", "P0101")
+
+    package = idx["packages"].get(name)
+    if package is None:
+        package = {"versions": {}}
+        idx["packages"][name] = package
+    if not isinstance(package, dict) or not isinstance(package.get("versions"), dict):
+        raise QichError(f"metadata paket '{name}' tidak valid", "RegistryError", "P0101")
+    versions = package["versions"]
+    if version in versions:
         raise QichError(f"{name} {version} sudah ada; versi terpublikasi bersifat immutable", "RegistryError", "P0130")
+
     others = [n for n in idx["packages"] if n != name]
-    if name not in idx["packages"] or not ex["versions"]:
+    if not versions:
         sim = similar_names(name, others)
         if sim: raise QichError(f"nama '{name}' terlalu mirip dengan {', '.join(sim)}", "SecurityError", "P0121")
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for base, dirs, files in os.walk(pkg_dir):
-            dirs[:] = sorted(x for x in dirs if x not in SKIP)
-            for fn in sorted(files):
-                p = os.path.join(base, fn)
-                if fn in SKIP or os.path.islink(p): continue
-                z.write(p, os.path.relpath(p, pkg_dir).replace(os.sep, "/"))
-    data = buf.getvalue(); fname = f"{name}-{version}.qhpkg"
-    if len(data) > MAX_ARCHIVE_BYTES:
-        raise QichError("arsip paket melampaui batas ukuran registry", "ResourceLimit", "P0131")
-    with open(os.path.join(reg, fname), "xb") as f: f.write(data)
-    ex["versions"][version] = {"file": fname, "sha256": hashlib.sha256(data).hexdigest()}
-    with open(index_path(reg), "w", encoding="utf-8") as f: json.dump(idx, f, indent=2, sort_keys=True)
+
+    fname = f"{name}-{version}.qhpkg"
+    archive_path = os.path.join(reg, fname)
+    digest = _write_package_archive(pkg_dir, reg, archive_path)
+    versions[version] = {"file": fname, "sha256": digest}
+    try:
+        _write_index_atomic(reg, idx)
+    except Exception:
+        try:
+            os.unlink(archive_path)
+        except OSError:
+            pass
+        raise
     return fname
 
 
 def advisories(reg, name, version):
-    try: idx = load_index(reg)
-    except QichError: return []
+    try:
+        idx = load_index(reg)
+    except QichError:
+        return []
+    entries = idx.get("advisories", {})
+    if not isinstance(entries, dict):
+        return []
+    package_entries = entries.get(name, [])
+    if not isinstance(package_entries, list):
+        return []
     out = []
-    for a in idx.get("advisories", {}).get(name, []):
-        aff = a.get("affected", [])
-        for r in aff:
-            if r == version or (r.startswith("<") and _vt(version) < _vt(r[1:])): out.append(a); break
+    for advisory in package_entries:
+        if not isinstance(advisory, dict):
+            continue
+        affected = advisory.get("affected", [])
+        if not isinstance(affected, list):
+            continue
+        for item in affected:
+            if not isinstance(item, str):
+                continue
+            try:
+                if item == version or (item.startswith("<") and _vt(version) < _vt(item[1:])):
+                    out.append(advisory)
+                    break
+            except ValueError:
+                continue
     return out
