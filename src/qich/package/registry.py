@@ -363,10 +363,11 @@ def publish(pkg_dir, name, version, reg):
     if not isinstance(idx.get("advisories", {}), dict):
         raise QichError("metadata advisory registry tidak valid", "RegistryError", "P0101")
 
-    package = idx["packages"].get(name)
-    if package is None:
+    if name not in idx["packages"]:
         package = {"versions": {}}
         idx["packages"][name] = package
+    else:
+        package = idx["packages"][name]
     if not isinstance(package, dict) or not isinstance(package.get("versions"), dict):
         raise QichError(f"metadata paket '{name}' tidak valid", "RegistryError", "P0101")
     versions = package["versions"]
@@ -396,8 +397,10 @@ def publish(pkg_dir, name, version, reg):
 def advisories(reg, name, version):
     try:
         idx = load_index(reg)
-    except QichError:
-        return []
+    except QichError as exc:
+        if exc.code == "P0100":
+            return []
+        raise
     entries = idx.get("advisories", {})
     if not isinstance(entries, dict):
         return []

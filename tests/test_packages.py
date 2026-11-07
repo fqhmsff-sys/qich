@@ -239,5 +239,27 @@ class Packages(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.reg, "symlinked-1.0.0.qhpkg")))
 
 
+    def test_publish_rejects_null_package_metadata(self):
+        os.makedirs(self.reg, exist_ok=True)
+        index = os.path.join(self.reg, "index.json")
+        original = b'{"packages":{"safe":null}}'
+        with open(index, "wb") as stream:
+            stream.write(original)
+        lib = os.path.join(self.t, "safe"); mkpkg(lib, "safe", "1.0.0", "fn f() rtrn => 1\\n")
+        with self.assertRaises(QichError):
+            registry.publish(lib, "safe", "1.0.0", self.reg)
+        with open(index, "rb") as stream:
+            self.assertEqual(stream.read(), original)
+
+    def test_advisory_lookup_fails_closed_on_corrupt_index(self):
+        os.makedirs(self.reg, exist_ok=True)
+        self.assertEqual(registry.advisories(self.reg, "safe", "1.0.0"), [])
+        with open(os.path.join(self.reg, "index.json"), "wb") as stream:
+            stream.write(b'{"packages":')
+        with self.assertRaises(QichError):
+            registry.advisories(self.reg, "safe", "1.0.0")
+
+
+
 if __name__ == "__main__":
     unittest.main()
