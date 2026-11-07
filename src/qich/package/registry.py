@@ -13,6 +13,7 @@ from .lock import SKIP
 
 MAX_INDEX_BYTES = 16 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
+MAX_PACKAGE_CONTENT_BYTES = 100 * 1024 * 1024
 MAX_VERSION_COMPONENT_DIGITS = 9
 
 
@@ -169,6 +170,7 @@ def _write_package_archive(pkg_dir, registry_dir, archive_path):
     try:
         with os.fdopen(fd, "w+b") as raw:
             writer = _BoundedWriter(raw, MAX_ARCHIVE_BYTES)
+            total_uncompressed = 0
             with zipfile.ZipFile(writer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
                 for base, dirs, files in os.walk(package_root, followlinks=False):
                     dirs[:] = sorted(name for name in dirs if name not in SKIP)
@@ -186,11 +188,14 @@ def _write_package_archive(pkg_dir, registry_dir, archive_path):
                             continue
                         path = os.path.join(base, filename)
                         try:
-                            mode = os.lstat(path).st_mode
+                            info = os.lstat(path)
                         except OSError as exc:
                             raise QichError("file paket berubah saat dipublikasikan", "RegistryError", "P0131") from exc
-                        if not stat.S_ISREG(mode):
+                        if not stat.S_ISREG(info.st_mode):
                             raise QichError("symlink atau file khusus tidak diizinkan dalam paket", "SecurityError", "P0131")
+                        total_uncompressed += info.st_size
+                        if total_uncompressed > MAX_PACKAGE_CONTENT_BYTES:
+                            raise QichError("konten paket melampaui batas ekstraksi 100 MiB", "ResourceLimit", "P0131")
                         arcname = os.path.relpath(path, package_root).replace(os.sep, "/")
                         archive.write(path, arcname)
 

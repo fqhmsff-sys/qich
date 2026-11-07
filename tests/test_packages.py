@@ -224,6 +224,23 @@ class Packages(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.reg, "index.json")))
         self.assertFalse(any(name.startswith(".qich-publish-") for name in os.listdir(self.reg)))
 
+
+    def test_publish_uncompressed_limit_matches_extractor(self):
+        os.makedirs(self.reg, exist_ok=True)
+        lib = os.path.join(self.t, "expanded"); mkpkg(lib, "expanded", "1.0.0", "fn f() rtrn => 1\\n")
+        with open(os.path.join(lib, "src", "large.bin"), "wb") as stream:
+            stream.write(os.urandom(4096))
+        old_limit = registry.MAX_PACKAGE_CONTENT_BYTES
+        try:
+            registry.MAX_PACKAGE_CONTENT_BYTES = 512
+            with self.assertRaises(QichError) as caught:
+                registry.publish(lib, "expanded", "1.0.0", self.reg)
+            self.assertEqual(caught.exception.kind, "ResourceLimit")
+        finally:
+            registry.MAX_PACKAGE_CONTENT_BYTES = old_limit
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "expanded-1.0.0.qhpkg")))
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "index.json")))
+
     def test_publish_rejects_symlink_package_members(self):
         lib = os.path.join(self.t, "symlinked"); mkpkg(lib, "symlinked", "1.0.0", "fn f() rtrn => 1\n")
         outside = os.path.join(self.t, "outside.qh")
@@ -245,7 +262,7 @@ class Packages(unittest.TestCase):
         original = b'{"packages":{"safe":null}}'
         with open(index, "wb") as stream:
             stream.write(original)
-        lib = os.path.join(self.t, "safe"); mkpkg(lib, "safe", "1.0.0", "fn f() rtrn => 1\\n")
+        lib = os.path.join(self.t, "safe"); mkpkg(lib, "safe", "1.0.0", "fn f() rtrn => 1\n")
         with self.assertRaises(QichError):
             registry.publish(lib, "safe", "1.0.0", self.reg)
         with open(index, "rb") as stream:
