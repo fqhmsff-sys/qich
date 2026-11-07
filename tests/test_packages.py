@@ -227,7 +227,7 @@ class Packages(unittest.TestCase):
 
     def test_publish_uncompressed_limit_matches_extractor(self):
         os.makedirs(self.reg, exist_ok=True)
-        lib = os.path.join(self.t, "expanded"); mkpkg(lib, "expanded", "1.0.0", "fn f() rtrn => 1\\n")
+        lib = os.path.join(self.t, "expanded"); mkpkg(lib, "expanded", "1.0.0", "fn f() rtrn => 1\n")
         with open(os.path.join(lib, "src", "large.bin"), "wb") as stream:
             stream.write(os.urandom(4096))
         old_limit = registry.MAX_PACKAGE_CONTENT_BYTES
