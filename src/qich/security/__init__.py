@@ -2,6 +2,9 @@
 import io
 import os
 import re
+import stat
+import tempfile
+import unicodedata
 import zipfile
 
 PY_DENY = {"os", "sys", "subprocess", "ctypes", "shutil", "socket", "importlib", "builtins",
@@ -27,41 +30,124 @@ class Policy:
         return True
 
 
+def _zip_member_path(name):
+    """Return a portable canonical path and directory flag for one ZIP member."""
+    if not isinstance(name, str) or not name or "\x00" in name:
+        raise ValueError("nama file arsip kosong atau tidak valid")
+    normalized = unicodedata.normalize("NFC", name.replace("\\", "/"))
+    is_dir = normalized.endswith("/")
+    if is_dir:
+        normalized = normalized[:-1]
+    if not normalized or normalized.startswith("/"):
+        raise ValueError(f"path absolut/kosong di arsip: {name!r}")
+
+    parts = normalized.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        raise ValueError(f"segmen path berbahaya di arsip: {name!r}")
+
+    reserved = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    reserved.update(f"COM{i}" for i in range(1, 10))
+    reserved.update(f"LPT{i}" for i in range(1, 10))
+    # Windows also reserves the superscript 1/2/3 device-name spellings.
+    reserved.update(f"COM{x}" for x in ("¹", "²", "³"))
+    reserved.update(f"LPT{x}" for x in ("¹", "²", "³"))
+    for part in parts:
+        # Colon also rejects NTFS alternate data streams and drive-like segments.
+        if ":" in part or part != part.rstrip(" ."):
+            raise ValueError(f"komponen path tidak portabel: {name!r}")
+        stem = part.split(".", 1)[0].rstrip(" .").upper()
+        if stem in reserved:
+            raise ValueError(f"nama perangkat Windows tidak diizinkan: {name!r}")
+
+    return "/".join(parts), is_dir
+
+
+def _within_directory(base, path):
+    """Case-normalized containment check that also handles filesystem roots."""
+    base_path = os.path.normcase(os.path.realpath(base))
+    target_path = os.path.normcase(os.path.realpath(path))
+    try:
+        return os.path.commonpath((base_path, target_path)) == base_path
+    except ValueError:
+        # Different Windows drives cannot share a destination root.
+        return False
+
+
 def safe_extract_zip(data: bytes, dest: str, max_files=2000, max_total=100 * 1024 * 1024):
-    """Ekstraksi zip aman: tolak path absolut, '..', symlink, zip-bomb."""
-    zf = zipfile.ZipFile(io.BytesIO(data))
-    infos = zf.infolist()
-    if len(infos) > max_files:
-        raise ValueError("arsip berisi terlalu banyak file")
-    total = 0
-    base = os.path.realpath(dest)
-    for zi in infos:
-        name = zi.filename
-        if name.startswith("/") or ".." in name.replace("\\", "/").split("/") or ":" in name.split("/")[0]:
-            raise ValueError(f"path berbahaya di arsip: {name!r}")
-        if (zi.external_attr >> 16) & 0o170000 == 0o120000:
-            raise ValueError(f"symlink tidak diizinkan di arsip: {name!r}")
-        total += zi.file_size
-        if total > max_total:
-            raise ValueError("arsip terlalu besar setelah diekstrak")
-        target = os.path.realpath(os.path.join(base, name))
-        if not (target == base or target.startswith(base + os.sep)):
-            raise ValueError(f"path keluar dari tujuan: {name!r}")
-    os.makedirs(base, exist_ok=True)
-    for zi in infos:
-        target = os.path.join(base, zi.filename)
-        # Re-check during extraction: an existing symlink inside dest could
-        # redirect writes outside the destination after the initial validation.
-        resolved = os.path.realpath(target)
-        if not (resolved == base or resolved.startswith(base + os.sep)):
-            raise ValueError(f"path keluar dari tujuan: {zi.filename!r}")
-        if zi.is_dir():
-            os.makedirs(target, exist_ok=True)
-        else:
-            os.makedirs(os.path.dirname(target), exist_ok=True)
-            # Parent directories may themselves be symlinks.
-            resolved = os.path.realpath(target)
-            if not (resolved == base or resolved.startswith(base + os.sep)):
+    """Ekstraksi ZIP dengan path portable, collision checks, dan I/O berbatas."""
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        infos = zf.infolist()
+        if len(infos) > max_files:
+            raise ValueError("arsip berisi terlalu banyak file")
+
+        total = 0
+        base = os.path.realpath(dest)
+        validated = []
+        seen = {}
+
+        for zi in infos:
+            member, is_dir = _zip_member_path(zi.filename)
+            key = member.casefold()
+            if key in seen:
+                raise ValueError(f"path duplikat/tidak portabel di arsip: {zi.filename!r}")
+
+            parts = member.split("/")
+            for index in range(1, len(parts)):
+                parent = "/".join(parts[:index]).casefold()
+                if parent in seen and not seen[parent]:
+                    raise ValueError(f"file dipakai sebagai direktori di arsip: {zi.filename!r}")
+            if not is_dir and any(existing.startswith(key + "/") for existing in seen):
+                raise ValueError(f"direktori dipakai sebagai file di arsip: {zi.filename!r}")
+
+            mode = (zi.external_attr >> 16) & 0xFFFF
+            kind = stat.S_IFMT(mode)
+            if kind not in (0, stat.S_IFREG, stat.S_IFDIR):
+                raise ValueError(f"tipe file khusus tidak diizinkan di arsip: {zi.filename!r}")
+            if kind == stat.S_IFDIR and not is_dir:
+                raise ValueError(f"metadata direktori ZIP tidak konsisten: {zi.filename!r}")
+            if kind == stat.S_IFREG and is_dir:
+                raise ValueError(f"metadata file ZIP tidak konsisten: {zi.filename!r}")
+
+            total += zi.file_size
+            if total > max_total:
+                raise ValueError("arsip terlalu besar setelah diekstrak")
+            seen[key] = is_dir
+            validated.append((zi, member, is_dir))
+
+        os.makedirs(base, exist_ok=True)
+        actual_total = 0
+        for zi, member, is_dir in validated:
+            target = os.path.join(base, *member.split("/"))
+            if not _within_directory(base, target):
                 raise ValueError(f"path keluar dari tujuan: {zi.filename!r}")
-            with open(target, "wb") as f:
-                f.write(zf.read(zi))
+
+            if is_dir:
+                os.makedirs(target, exist_ok=True)
+                if not _within_directory(base, target):
+                    raise ValueError(f"path direktori keluar dari tujuan: {zi.filename!r}")
+                continue
+
+            parent = os.path.dirname(target)
+            os.makedirs(parent, exist_ok=True)
+            if not _within_directory(base, target):
+                raise ValueError(f"path keluar dari tujuan: {zi.filename!r}")
+
+            fd, temporary = tempfile.mkstemp(prefix=".qich-extract-", dir=parent)
+            try:
+                with os.fdopen(fd, "wb") as output, zf.open(zi, "r") as source:
+                    while True:
+                        chunk = source.read(64 * 1024)
+                        if not chunk:
+                            break
+                        actual_total += len(chunk)
+                        if actual_total > max_total:
+                            raise ValueError("ukuran hasil ekstraksi melampaui batas")
+                        output.write(chunk)
+
+                # Re-check immediately before replacing the destination entry.
+                if not _within_directory(base, target):
+                    raise ValueError(f"path keluar dari tujuan: {zi.filename!r}")
+                os.replace(temporary, target)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)

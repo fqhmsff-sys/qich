@@ -1,4 +1,4 @@
-import json, os, shutil, tempfile, unittest
+import hashlib, json, os, shutil, tempfile, unittest
 from helpers import qh, ROOT
 from qich.package import registry
 from qich.compiler.diagnostics import QichError
@@ -93,6 +93,54 @@ class Packages(unittest.TestCase):
         self.assertNotEqual(p.returncode, 0); self.assertIn("melingkar", p.stderr)
 
 
+    def test_registry_index_is_bounded_and_rejects_duplicate_keys(self):
+        os.makedirs(self.reg, exist_ok=True)
+        old_limit = registry.MAX_INDEX_BYTES
+        try:
+            registry.MAX_INDEX_BYTES = 64
+            with open(os.path.join(self.reg, "index.json"), "wb") as f:
+                f.write(b" " * 65)
+            with self.assertRaises(QichError) as c:
+                registry.load_index(self.reg)
+            self.assertEqual(c.exception.kind, "ResourceLimit")
+
+            registry.MAX_INDEX_BYTES = 1024
+            with open(os.path.join(self.reg, "index.json"), "wb") as f:
+                f.write(b'{"packages":{},"packages":{}}')
+            with self.assertRaises(QichError):
+                registry.load_index(self.reg)
+        finally:
+            registry.MAX_INDEX_BYTES = old_limit
+
+    def test_registry_archive_size_and_path_are_bounded(self):
+        os.makedirs(self.reg, exist_ok=True)
+        archive = os.path.join(self.reg, "demo-1.0.0.qhpkg")
+        with open(archive, "wb") as f:
+            f.write(b"0123456789")
+        old_limit = registry.MAX_ARCHIVE_BYTES
+        try:
+            registry.MAX_ARCHIVE_BYTES = 8
+            with self.assertRaises(QichError) as c:
+                registry.fetch(self.reg, "demo", "1.0.0", {
+                    "file": "demo-1.0.0.qhpkg",
+                    "sha256": hashlib.sha256(b"0123456789").hexdigest(),
+                })
+            self.assertEqual(c.exception.kind, "ResourceLimit")
+            with self.assertRaises(QichError):
+                registry.fetch(self.reg, "demo", "1.0.0", {
+                    "file": "../outside.qhpkg",
+                    "sha256": "0" * 64,
+                })
+        finally:
+            registry.MAX_ARCHIVE_BYTES = old_limit
+
+    def test_registry_rejects_malformed_version_metadata(self):
+        os.makedirs(self.reg, exist_ok=True)
+        with open(os.path.join(self.reg, "index.json"), "w", encoding="utf-8") as f:
+            json.dump({"packages": {"demo": {"versions": {"1.0.0": None}}}}, f)
+        with self.assertRaises(QichError):
+            registry.resolve(self.reg, "demo", "*")
+
     def test_caret_version_ranges_follow_semver(self):
         os.makedirs(self.reg, exist_ok=True)
         idx = {"packages": {"demo": {"versions": {v: {"file": f"demo-{v}.qhpkg", "sha256": "x"} for v in ("0.0.3", "0.0.4", "0.1.0", "0.2.0", "0.9.0", "1.0.0", "1.2.0", "1.9.0", "2.0.0")}}}}
@@ -123,6 +171,111 @@ class Packages(unittest.TestCase):
         app = self.proj()
         w(os.path.join(app, "src", "main.qh"), 'use mod:..secret\nfn main() { }\n')
         self.assertNotEqual(qh(["run"], app).returncode, 0)
+
+    def test_registry_rejects_symlink_index_and_publish_preserves_target(self):
+        os.makedirs(self.reg, exist_ok=True)
+        outside = os.path.join(self.t, "outside-index.json")
+        original = b'{"packages":{},"marker":"must stay unchanged"}'
+        with open(outside, "wb") as stream:
+            stream.write(original)
+        index = os.path.join(self.reg, "index.json")
+        try:
+            os.symlink(outside, index)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink tidak didukung di lingkungan ini")
+
+        with self.assertRaises(QichError) as caught:
+            registry.load_index(self.reg)
+        self.assertEqual(caught.exception.kind, "SecurityError")
+
+        lib = os.path.join(self.t, "safe"); mkpkg(lib, "safe", "1.0.0", "fn f() rtrn => 1\n")
+        with self.assertRaises(QichError):
+            registry.publish(lib, "safe", "1.0.0", self.reg)
+        with open(outside, "rb") as stream:
+            self.assertEqual(stream.read(), original)
+
+    def test_publish_does_not_replace_malformed_registry_index(self):
+        os.makedirs(self.reg, exist_ok=True)
+        index = os.path.join(self.reg, "index.json")
+        original = b'{"packages":'
+        with open(index, "wb") as stream:
+            stream.write(original)
+        lib = os.path.join(self.t, "safe"); mkpkg(lib, "safe", "1.0.0", "fn f() rtrn => 1\n")
+        with self.assertRaises(QichError):
+            registry.publish(lib, "safe", "1.0.0", self.reg)
+        with open(index, "rb") as stream:
+            self.assertEqual(stream.read(), original)
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "safe-1.0.0.qhpkg")))
+
+    def test_publish_archive_limit_is_enforced_during_writing(self):
+        os.makedirs(self.reg, exist_ok=True)
+        lib = os.path.join(self.t, "large"); mkpkg(lib, "large", "1.0.0", "fn f() rtrn => 1\n")
+        with open(os.path.join(lib, "src", "random.bin"), "wb") as stream:
+            stream.write(os.urandom(4096))
+        old_limit = registry.MAX_ARCHIVE_BYTES
+        try:
+            registry.MAX_ARCHIVE_BYTES = 256
+            with self.assertRaises(QichError) as caught:
+                registry.publish(lib, "large", "1.0.0", self.reg)
+            self.assertEqual(caught.exception.kind, "ResourceLimit")
+        finally:
+            registry.MAX_ARCHIVE_BYTES = old_limit
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "large-1.0.0.qhpkg")))
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "index.json")))
+        self.assertFalse(any(name.startswith(".qich-publish-") for name in os.listdir(self.reg)))
+
+
+    def test_publish_uncompressed_limit_matches_extractor(self):
+        os.makedirs(self.reg, exist_ok=True)
+        lib = os.path.join(self.t, "expanded"); mkpkg(lib, "expanded", "1.0.0", "fn f() rtrn => 1\n")
+        with open(os.path.join(lib, "src", "large.bin"), "wb") as stream:
+            stream.write(os.urandom(4096))
+        old_limit = registry.MAX_PACKAGE_CONTENT_BYTES
+        try:
+            registry.MAX_PACKAGE_CONTENT_BYTES = 512
+            with self.assertRaises(QichError) as caught:
+                registry.publish(lib, "expanded", "1.0.0", self.reg)
+            self.assertEqual(caught.exception.kind, "ResourceLimit")
+        finally:
+            registry.MAX_PACKAGE_CONTENT_BYTES = old_limit
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "expanded-1.0.0.qhpkg")))
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "index.json")))
+
+    def test_publish_rejects_symlink_package_members(self):
+        lib = os.path.join(self.t, "symlinked"); mkpkg(lib, "symlinked", "1.0.0", "fn f() rtrn => 1\n")
+        outside = os.path.join(self.t, "outside.qh")
+        with open(outside, "w", encoding="utf-8") as stream:
+            stream.write("fn outside() rtrn => 1\n")
+        try:
+            os.symlink(outside, os.path.join(lib, "src", "linked.qh"))
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink tidak didukung di lingkungan ini")
+        with self.assertRaises(QichError) as caught:
+            registry.publish(lib, "symlinked", "1.0.0", self.reg)
+        self.assertEqual(caught.exception.kind, "SecurityError")
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "symlinked-1.0.0.qhpkg")))
+
+
+    def test_publish_rejects_null_package_metadata(self):
+        os.makedirs(self.reg, exist_ok=True)
+        index = os.path.join(self.reg, "index.json")
+        original = b'{"packages":{"safe":null}}'
+        with open(index, "wb") as stream:
+            stream.write(original)
+        lib = os.path.join(self.t, "safe"); mkpkg(lib, "safe", "1.0.0", "fn f() rtrn => 1\n")
+        with self.assertRaises(QichError):
+            registry.publish(lib, "safe", "1.0.0", self.reg)
+        with open(index, "rb") as stream:
+            self.assertEqual(stream.read(), original)
+
+    def test_advisory_lookup_fails_closed_on_corrupt_index(self):
+        os.makedirs(self.reg, exist_ok=True)
+        self.assertEqual(registry.advisories(self.reg, "safe", "1.0.0"), [])
+        with open(os.path.join(self.reg, "index.json"), "wb") as stream:
+            stream.write(b'{"packages":')
+        with self.assertRaises(QichError):
+            registry.advisories(self.reg, "safe", "1.0.0")
+
 
 
 if __name__ == "__main__":
