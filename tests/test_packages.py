@@ -278,5 +278,36 @@ class Packages(unittest.TestCase):
 
 
 
+    def test_path_dependency_rejects_symlink_members_before_copy(self):
+        for kind in ("file", "directory"):
+            with self.subTest(kind=kind):
+                base = os.path.join(self.t, kind)
+                os.makedirs(base)
+                lib = os.path.join(base, "mylib")
+                mkpkg(lib, "mylib", "1.0.0", "fn f() rtrn => 1\\n")
+                outside = os.path.join(base, "outside")
+                if kind == "file":
+                    with open(outside, "w", encoding="utf-8") as stream:
+                        stream.write("fn leaked() rtrn => 99\\n")
+                    link_path = os.path.join(lib, "src", "linked.qh")
+                else:
+                    os.makedirs(outside)
+                    w(os.path.join(outside, "secret.qh"), "fn leaked() rtrn => 99\\n")
+                    link_path = os.path.join(lib, "src", "external")
+
+                try:
+                    os.symlink(outside, link_path, target_is_directory=(kind == "directory"))
+                except (OSError, NotImplementedError):
+                    self.skipTest("symlink tidak didukung di lingkungan ini")
+
+                created = qh(["new", "app"], base)
+                self.assertEqual(created.returncode, 0, created.stderr)
+                app = os.path.join(base, "app")
+                result = qh(["add", "--path", "../mylib", "mylib"], app)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("symlink", result.stderr.lower())
+                self.assertFalse(os.path.lexists(os.path.join(app, ".qh", "deps", "mylib")))
+
+
 if __name__ == "__main__":
     unittest.main()
