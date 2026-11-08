@@ -6,7 +6,8 @@ from qich.compiler.diagnostics import QichError
 
 def w(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    open(path, "w", encoding="utf-8").write(text)
+    with open(path, "w", encoding="utf-8") as stream:
+        stream.write(text)
 
 
 def mkpkg(d, name, version, lib_body, deps=""):
@@ -31,7 +32,8 @@ class Packages(unittest.TestCase):
         p = qh(["add", "--path", "../mylib", "mylib"], app); self.assertEqual(p.returncode, 0, p.stderr)
         w(os.path.join(app, "src", "main.qh"), 'use pkg:mylib\nfn main() { print(mylib.dobel(21)) }\n')
         p = qh(["run"], app); self.assertEqual(p.stdout.strip(), "42", p.stderr)
-        self.assertIn("sha256", open(os.path.join(app, "qh.lock")).read())
+        with open(os.path.join(app, "qh.lock"), encoding="utf-8") as stream:
+            self.assertIn("sha256", stream.read())
         p = qh(["build"], app); self.assertEqual(p.returncode, 0, p.stderr)
         shutil.rmtree(os.path.join(app, ".qh")); shutil.rmtree(lib)  # .qhc mandiri, tanpa dependensi
         p = qh(["run", "build/app.qhc"], app); self.assertEqual(p.stdout.strip(), "42", p.stderr)
@@ -54,9 +56,11 @@ class Packages(unittest.TestCase):
         app = self.proj(); p = qh(["add", "greet"], app, self.env); self.assertEqual(p.returncode, 0, p.stderr)
         w(os.path.join(app, "src", "main.qh"), 'use pkg:greet\nfn main() { print(greet.hi()) }\n')
         self.assertEqual(qh(["run"], app, self.env).stdout.strip(), "v1.1")
-        idx = json.load(open(os.path.join(self.reg, "index.json")))
+        with open(os.path.join(self.reg, "index.json"), encoding="utf-8") as stream:
+            idx = json.load(stream)
         idx["advisories"] = {"greet": [{"id": "QH-2026-0001", "summary": "contoh", "affected": ["<1.2.0"]}]}
-        json.dump(idx, open(os.path.join(self.reg, "index.json"), "w"))
+        with open(os.path.join(self.reg, "index.json"), "w", encoding="utf-8") as stream:
+            json.dump(idx, stream)
         p = qh(["audit"], app, self.env); self.assertNotEqual(p.returncode, 0); self.assertIn("QH-2026-0001", p.stdout)
 
     def test_registry_archive_tamper_detected(self):
@@ -81,8 +85,10 @@ class Packages(unittest.TestCase):
         lib = os.path.join(self.t, "internal"); mkpkg(lib, "internal", "1.0.0", 'fn f() rtrn => "privat"\n')
         app = self.proj(); qh(["add", "--path", "../internal", "internal"], app)
         evil = os.path.join(self.t, "evil"); mkpkg(evil, "internal", "9.9.9", 'fn f() rtrn => "jahat"\n'); qh(["publish", self.reg], evil)
-        toml = open(os.path.join(app, "qh.toml")).read().replace('internal = { path = "../internal" }', 'internal = "9.9.9"')
-        open(os.path.join(app, "qh.toml"), "w").write(toml)
+        with open(os.path.join(app, "qh.toml"), encoding="utf-8") as stream:
+            toml = stream.read().replace('internal = { path = "../internal" }', 'internal = "9.9.9"')
+        with open(os.path.join(app, "qh.toml"), "w", encoding="utf-8") as stream:
+            stream.write(toml)
         w(os.path.join(app, "src", "main.qh"), 'use pkg:internal\nfn main() { print(internal.f()) }\n')
         p = qh(["run"], app, self.env); self.assertNotEqual(p.returncode, 0); self.assertIn("dependency confusion", p.stderr)
 
@@ -165,7 +171,9 @@ class Packages(unittest.TestCase):
 
     def test_bridge_allow_is_recorded_not_installed(self):
         app = self.proj(); p = qh(["add", "py:numpy"], app); self.assertEqual(p.returncode, 0)
-        self.assertIn('py:numpy', open(os.path.join(app, "qh.toml")).read()); self.assertIn("tidak meng-install", p.stdout)
+        with open(os.path.join(app, "qh.toml"), encoding="utf-8") as stream:
+            self.assertIn("py:numpy", stream.read())
+        self.assertIn("tidak meng-install", p.stdout)
 
     def test_unknown_module_path_traversal(self):
         app = self.proj()
