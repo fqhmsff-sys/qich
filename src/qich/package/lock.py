@@ -81,7 +81,7 @@ def pkg_hash(d):
                         if not chunk:
                             break
                         file_hash.update(chunk)
-                h.update(rel.encode("utf-8") + b"\\0" + file_hash.digest())
+                h.update(rel.encode("utf-8") + b"\0" + file_hash.digest())
             finally:
                 if fd is not None:
                     os.close(fd)
@@ -99,7 +99,7 @@ def write(root, entries):
     out = ["# Dihasilkan oleh qh. Jangan ubah manual.", "version = 1"]
     for name in sorted(entries):
         e = entries[name]
-        out.append("\\n[[package]]")
+        out.append("\n[[package]]")
         for k in ("name", "version", "source", "sha256", "archive_sha256"):
             if k in e: out.append(f'{k} = "{e[k]}"')
-    with open(os.path.join(root, "qh.lock"), "w", encoding="utf-8") as f: f.write("\\n".join(out) + "\\n")
+    with open(os.path.join(root, "qh.lock"), "w", encoding="utf-8") as f: f.write("\n".join(out) + "\n")
