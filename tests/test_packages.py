@@ -161,9 +161,11 @@ class Packages(unittest.TestCase):
     def test_dependency_name_path_traversal_rejected(self):
         app = self.proj()
         manifest_path = os.path.join(app, "qh.toml")
-        text = open(manifest_path, encoding="utf-8").read()
+        with open(manifest_path, encoding="utf-8") as stream:
+            text = stream.read()
         text = text.replace("[dependencies]", '[dependencies]\n"../../outside" = { path = "../mylib" }', 1)
-        open(manifest_path, "w", encoding="utf-8").write(text)
+        with open(manifest_path, "w", encoding="utf-8") as stream:
+            stream.write(text)
         p = qh(["run"], app)
         self.assertNotEqual(p.returncode, 0)
         self.assertIn("nama dependensi tidak valid", p.stderr)
