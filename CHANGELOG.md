@@ -19,3 +19,6 @@ Perubahan penting untuk pengguna Qich dicatat di sini.
 - Tolak symlink dan file khusus pada pohon dependensi lokal sebelum hashing/penyalinan, sehingga konten di luar paket tidak ikut tersalin diam-diam.
 - Perbarui action CI checkout, setup-python, upload-artifact, dan release ke rilis berbasis Node 24 agar tidak bergantung pada runtime Node 20 yang deprecated.
 - Batasan tetap berlaku: checksum `.qhc` bukan tanda tangan digital; bridge Python bukan sandbox; platform selain Linux belum diverifikasi CI.
+
+- Tolak direktori vendor `.qh/deps`, entri dependensi, akar hashing, dan tujuan ekstraksi ZIP yang berupa symlink; buat serta validasi direktori vendor tanpa mengikuti symlink.
+- Lindungi `qh.lock` dari symlink saat dibaca/ditulis, batasi ukurannya, dan tulis pembaruan secara atomik.

@@ -1,6 +1,7 @@
 import hashlib, json, os, shutil, tempfile, unittest
 from helpers import qh, ROOT
-from qich.package import registry
+from qich.package import lock, registry
+from qich.package.resolver import ensure_deps
 from qich.compiler.diagnostics import QichError
 
 
@@ -317,6 +318,85 @@ class Packages(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("symlink", result.stderr.lower())
                 self.assertFalse(os.path.lexists(os.path.join(app, ".qh", "deps", "mylib")))
+
+
+    def test_pkg_hash_rejects_symlink_root(self):
+        lib = os.path.join(self.t, "hash-root")
+        mkpkg(lib, "hashroot", "1.0.0", "fn f() rtrn => 1\\n")
+        link = os.path.join(self.t, "hash-root-link")
+        try:
+            os.symlink(lib, link, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink tidak didukung di lingkungan ini")
+        with self.assertRaises(QichError):
+            lock.pkg_hash(link)
+
+    def test_lock_read_and_write_reject_symlink_without_touching_target(self):
+        app = self.proj()
+        outside = os.path.join(self.t, "outside-lock.toml")
+        original = b"marker = \"keep me\"\\n"
+        with open(outside, "wb") as stream:
+            stream.write(original)
+        lock_path = os.path.join(app, "qh.lock")
+        try:
+            os.symlink(outside, lock_path)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink tidak didukung di lingkungan ini")
+        with self.assertRaises(QichError):
+            lock.read(app)
+        with self.assertRaises(QichError):
+            lock.write(app, {})
+        with open(outside, "rb") as stream:
+            self.assertEqual(stream.read(), original)
+
+    def test_vendor_directory_symlinks_are_rejected_before_writing(self):
+        for component in (".qh", "deps"):
+            with self.subTest(component=component):
+                base = os.path.join(self.t, component)
+                os.makedirs(base, exist_ok=True)
+                lib = os.path.join(base, "mylib")
+                mkpkg(lib, "mylib", "1.0.0", "fn f() rtrn => 1\\n")
+                app = os.path.join(base, "app")
+                created = qh(["new", "app"], base)
+                self.assertEqual(created.returncode, 0, created.stderr)
+                w(os.path.join(app, "qh.toml"),
+                  '[package]\\nname = "app"\\nversion = "1.0.0"\\n\\n'
+                  '[dependencies]\\nmylib = { path = "../mylib" }\\n')
+                outside = os.path.join(base, "outside-state")
+                os.makedirs(outside, exist_ok=True)
+                if component == ".qh":
+                    shutil.rmtree(os.path.join(app, ".qh"))
+                    link = os.path.join(app, ".qh")
+                else:
+                    shutil.rmtree(os.path.join(app, ".qh", "deps"))
+                    link = os.path.join(app, ".qh", "deps")
+                try:
+                    os.symlink(outside, link, target_is_directory=True)
+                except (OSError, NotImplementedError):
+                    self.skipTest("symlink tidak didukung di lingkungan ini")
+                with self.assertRaises(QichError):
+                    ensure_deps(app)
+                self.assertFalse(os.path.lexists(os.path.join(outside, "mylib")))
+
+    def test_vendor_dependency_entry_symlink_is_rejected(self):
+        base = os.path.join(self.t, "vendor-entry")
+        os.makedirs(base)
+        lib = os.path.join(base, "mylib")
+        mkpkg(lib, "mylib", "1.0.0", "fn f() rtrn => 1\\n")
+        app = os.path.join(base, "app")
+        created = qh(["new", "app"], base)
+        self.assertEqual(created.returncode, 0, created.stderr)
+        w(os.path.join(app, "qh.toml"),
+          '[package]\\nname = "app"\\nversion = "1.0.0"\\n\\n'
+          '[dependencies]\\nmylib = { path = "../mylib" }\\n')
+        entry = os.path.join(app, ".qh", "deps", "mylib")
+        try:
+            os.symlink(lib, entry, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink tidak didukung di lingkungan ini")
+        with self.assertRaises(QichError):
+            ensure_deps(app)
+        self.assertTrue(os.path.isdir(lib))
 
 
 if __name__ == "__main__":

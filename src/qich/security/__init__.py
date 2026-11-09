@@ -81,7 +81,17 @@ def safe_extract_zip(data: bytes, dest: str, max_files=2000, max_total=100 * 102
             raise ValueError("arsip berisi terlalu banyak file")
 
         total = 0
-        base = os.path.realpath(dest)
+        destination = os.path.abspath(os.fspath(dest))
+        try:
+            destination_info = os.lstat(destination)
+        except FileNotFoundError:
+            os.makedirs(destination, exist_ok=True)
+            destination_info = os.lstat(destination)
+        except OSError as exc:
+            raise ValueError("direktori tujuan ekstraksi tidak dapat diperiksa") from exc
+        if not stat.S_ISDIR(destination_info.st_mode):
+            raise ValueError("tujuan ekstraksi harus berupa direktori nyata, bukan symlink atau file")
+        base = os.path.realpath(destination)
         validated = []
         seen = {}
 
@@ -114,7 +124,6 @@ def safe_extract_zip(data: bytes, dest: str, max_files=2000, max_total=100 * 102
             seen[key] = is_dir
             validated.append((zi, member, is_dir))
 
-        os.makedirs(base, exist_ok=True)
         actual_total = 0
         for zi, member, is_dir in validated:
             target = os.path.join(base, *member.split("/"))

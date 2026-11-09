@@ -1,15 +1,18 @@
 import hashlib
 import os
 import stat
+import tempfile
 import tomllib
 from ..compiler.diagnostics import QichError
+
+MAX_LOCK_BYTES = 16 * 1024 * 1024
 
 SKIP = {".qh", "build", ".git", "__pycache__", "qh.lock"}
 
 
 def pkg_hash(d):
     """Hash regular package files; reject links and special files before copying."""
-    root = os.path.realpath(d)
+    root = os.path.abspath(os.fspath(d))
     try:
         root_info = os.lstat(root)
     except OSError as exc:
@@ -89,17 +92,90 @@ def pkg_hash(d):
 
 
 def read(root):
-    p = os.path.join(root, "qh.lock")
-    if not os.path.isfile(p): return {}
-    with open(p, "rb") as f: d = tomllib.load(f)
-    return {e["name"]: e for e in d.get("package", [])}
+    path = os.path.join(root, "qh.lock")
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return {}
+    except OSError as exc:
+        raise QichError("qh.lock tidak dapat diperiksa", "ManifestError", "P0154") from exc
+    if not stat.S_ISREG(info.st_mode):
+        raise QichError("qh.lock harus berupa file reguler, bukan symlink atau file khusus", "SecurityError", "P0154")
+
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise QichError("qh.lock tidak dapat dibuka dengan aman", "SecurityError", "P0154") from exc
+
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(info, opened):
+            raise QichError("qh.lock berubah atau bukan file reguler", "SecurityError", "P0154")
+        with os.fdopen(fd, "rb") as stream:
+            fd = None
+            raw = stream.read(MAX_LOCK_BYTES + 1)
+    except OSError as exc:
+        raise QichError("qh.lock tidak dapat dibaca", "ManifestError", "P0154") from exc
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+    if len(raw) > MAX_LOCK_BYTES:
+        raise QichError("qh.lock melampaui batas ukuran", "ResourceLimit", "P0154")
+    try:
+        data = tomllib.loads(raw.decode("utf-8"))
+        packages = data.get("package", [])
+        if not isinstance(packages, list):
+            raise ValueError("package harus berupa array")
+        return {entry["name"]: entry for entry in packages}
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise QichError("qh.lock tidak valid", "ManifestError", "P0154") from exc
 
 
 def write(root, entries):
+    root = os.path.realpath(os.path.abspath(root))
+    path = os.path.join(root, "qh.lock")
+    try:
+        root_info = os.lstat(root)
+    except OSError as exc:
+        raise QichError("direktori proyek tidak dapat diperiksa", "ManifestError", "P0155") from exc
+    if not stat.S_ISDIR(root_info.st_mode):
+        raise QichError("akar proyek harus berupa direktori nyata", "SecurityError", "P0155")
+
+    try:
+        current = os.lstat(path)
+    except FileNotFoundError:
+        current = None
+    except OSError as exc:
+        raise QichError("qh.lock tidak dapat diperiksa sebelum ditulis", "ManifestError", "P0155") from exc
+    if current is not None and not stat.S_ISREG(current.st_mode):
+        raise QichError("qh.lock harus berupa file reguler; symlink tidak akan ditimpa", "SecurityError", "P0155")
+
     out = ["# Dihasilkan oleh qh. Jangan ubah manual.", "version = 1"]
     for name in sorted(entries):
         e = entries[name]
-        out.append("\n[[package]]")
+        out.append("\\n[[package]]")
         for k in ("name", "version", "source", "sha256", "archive_sha256"):
-            if k in e: out.append(f'{k} = "{e[k]}"')
-    with open(os.path.join(root, "qh.lock"), "w", encoding="utf-8") as f: f.write("\n".join(out) + "\n")
+            if k in e:
+                out.append(f'{k} = "{e[k]}"')
+    content = "\\n".join(out) + "\\n"
+
+    fd, temporary = tempfile.mkstemp(prefix=".qich-lock-", dir=root)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        # Replacing a path entry does not follow a symlink swapped in after lstat.
+        os.replace(temporary, path)
+    except OSError as exc:
+        raise QichError("qh.lock tidak dapat ditulis secara atomik", "ManifestError", "P0155") from exc
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)

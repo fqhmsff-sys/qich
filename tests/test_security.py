@@ -35,6 +35,22 @@ class Security(unittest.TestCase):
                 safe_extract_zip(b.getvalue(), d)
             self.assertFalse(os.path.exists(os.path.join(outside, "pwned.txt")))
 
+
+    def test_zip_rejects_symlink_destination_root(self):
+        for dangling in (False, True):
+            with self.subTest(dangling=dangling), tempfile.TemporaryDirectory() as root:
+                outside = os.path.join(root, "outside-target")
+                if not dangling:
+                    os.makedirs(outside)
+                link = os.path.join(root, "redirect")
+                try:
+                    os.symlink(outside, link, target_is_directory=True)
+                except (OSError, NotImplementedError):
+                    self.skipTest("symlink tidak didukung di lingkungan ini")
+                with self.assertRaises(ValueError):
+                    safe_extract_zip(self._zip_one("pwned.txt"), link)
+                self.assertFalse(os.path.exists(os.path.join(outside, "pwned.txt")))
+
     def test_bridge_denylist_and_allow(self):
         with self.assertRaises(QE) as c: run("use py:os")
         self.assertEqual(c.exception.kind, "SecurityError")

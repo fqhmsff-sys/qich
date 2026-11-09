@@ -1,26 +1,62 @@
 import os
 import shutil
+import stat
 from ..compiler.diagnostics import QichError
 from ..security import safe_extract_zip
 from . import manifest, lock, registry
 from .manifest import NAME_RE, RESERVED
 
 
-def _copy(src, dest):
-    if os.path.isdir(dest): shutil.rmtree(dest)
-    shutil.copytree(src, dest, ignore=shutil.ignore_patterns(*lock.SKIP, "*.pyc"), symlinks=False)
+def _existing_real_directory(path, label):
+    """Return whether path exists, rejecting symlink and non-directory entries."""
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise QichError(f"{label} tidak dapat diperiksa", "SecurityError", "P0153") from exc
+    if not stat.S_ISDIR(info.st_mode):
+        raise QichError(f"{label} harus berupa direktori nyata, bukan symlink atau file lain", "SecurityError", "P0153")
+    return True
 
+
+def _ensure_real_directory(path, label):
+    try:
+        os.mkdir(path)
+    except FileExistsError:
+        pass
+    except OSError as exc:
+        raise QichError(f"{label} tidak dapat dibuat", "SecurityError", "P0153") from exc
+    if not _existing_real_directory(path, label):
+        raise QichError(f"{label} tidak tersedia", "SecurityError", "P0153")
+    return path
+
+
+def _ensure_vendor_directory(root):
+    """Create and validate .qh/deps without following either directory symlink."""
+    root = os.path.realpath(os.path.abspath(root))
+    if not _existing_real_directory(root, "akar proyek"):
+        raise QichError("akar proyek tidak tersedia", "ManifestError", "P0153")
+    state_dir = _ensure_real_directory(os.path.join(root, ".qh"), "direktori .qh")
+    return _ensure_real_directory(os.path.join(state_dir, "deps"), "direktori vendor .qh/deps")
+
+
+def _copy(src, dest):
+    if _existing_real_directory(dest, "direktori dependensi vendor"):
+        shutil.rmtree(dest)
+    # Preserve links if the source changes after hashing; pkg_hash(dest) then rejects them.
+    shutil.copytree(src, dest, ignore=shutil.ignore_patterns(*lock.SKIP, "*.pyc"), symlinks=True)
 
 def registry_path(m):
     return os.environ.get("QH_REGISTRY") or (m.get("registry") or {}).get("path")
 
 
 def ensure_deps(root, update=False, log=None):
+    root = os.path.realpath(os.path.abspath(root))
     m = manifest.load(root)
     old = lock.read(root); new = {}; resolved = {}
     reg = registry_path(m)
-    vendor = os.path.join(root, ".qh", "deps")
-    os.makedirs(vendor, exist_ok=True)
+    vendor = _ensure_vendor_directory(root)
 
     def visit(name, spec, base_dir, chain):
         if not isinstance(name, str) or not NAME_RE.fullmatch(name):
@@ -30,6 +66,7 @@ def ensure_deps(root, update=False, log=None):
         if name in chain:
             raise QichError(f"dependensi melingkar: {' -> '.join(chain + [name])}", "ResolveError", "P0140")
         dest = os.path.join(vendor, name)
+        dest_exists = _existing_real_directory(dest, f"direktori dependensi '{name}'")
         if isinstance(spec, dict):
             src = os.path.realpath(os.path.join(base_dir, spec["path"]))
             if not os.path.isdir(src):
@@ -54,12 +91,19 @@ def ensure_deps(root, update=False, log=None):
             version = ver
             data = registry.fetch(reg, name, version, ent); arch = ent["sha256"]
             tmp = dest + ".tmp"
-            if os.path.isdir(tmp): shutil.rmtree(tmp)
+            if _existing_real_directory(tmp, f"direktori sementara dependensi '{name}'"):
+                shutil.rmtree(tmp)
             safe_extract_zip(data, tmp)
             sha = lock.pkg_hash(tmp); dm = manifest.load(tmp)
-            copy_from = lambda: (shutil.rmtree(dest) if os.path.isdir(dest) else None, os.replace(tmp, dest))
-            if os.path.isdir(dest) and lock.pkg_hash(dest) == sha:
-                shutil.rmtree(tmp); copy_from = lambda: None
+
+            def copy_from():
+                if _existing_real_directory(dest, f"direktori dependensi '{name}'"):
+                    shutil.rmtree(dest)
+                os.replace(tmp, dest)
+
+            if dest_exists and lock.pkg_hash(dest) == sha:
+                shutil.rmtree(tmp)
+                copy_from = lambda: None
             src = tmp
         if name in resolved:
             if resolved[name]["source"] != source or resolved[name]["version"] != version:
@@ -73,8 +117,9 @@ def ensure_deps(root, update=False, log=None):
             if e["sha256"] != sha:
                 raise QichError(f"integritas '{name}' gagal: isi paket berbeda dari qh.lock", "IntegrityError", "P0151",
                                 "jika perubahan sah, jalankan 'qh update'")
-        if not (os.path.isdir(dest) and lock.pkg_hash(dest) == sha):
+        if not (dest_exists and lock.pkg_hash(dest) == sha):
             copy_from()
+        _existing_real_directory(dest, f"direktori dependensi '{name}'")
         if lock.pkg_hash(dest) != sha:
             raise QichError(f"vendor '{name}' tidak konsisten setelah menyalin", "IntegrityError", "P0151")
         ent = {"name": name, "version": version, "source": source, "sha256": sha}
@@ -87,7 +132,19 @@ def ensure_deps(root, update=False, log=None):
         visit(n, s, root, [])
     # hapus vendor yatim
     for d in os.listdir(vendor):
-        if d not in new and not d.endswith(".tmp"): shutil.rmtree(os.path.join(vendor, d), ignore_errors=True)
+        if d in new or d == ".gitkeep" or d.endswith(".tmp"):
+            continue
+        path = os.path.join(vendor, d)
+        try:
+            info = os.lstat(path)
+        except OSError as exc:
+            raise QichError("entri vendor berubah saat dibersihkan", "SecurityError", "P0153") from exc
+        if stat.S_ISLNK(info.st_mode) or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+            raise QichError("entri vendor yatim harus berupa direktori/file reguler", "SecurityError", "P0153")
+        if stat.S_ISDIR(info.st_mode):
+            shutil.rmtree(path)
+        else:
+            os.unlink(path)
     if update or new != old:
         lock.write(root, new)
         if log: log("qh.lock diperbarui")
