@@ -364,12 +364,15 @@ class Packages(unittest.TestCase):
                   '[dependencies]\nmylib = { path = "../mylib" }\n')
                 outside = os.path.join(base, "outside-state")
                 os.makedirs(outside, exist_ok=True)
+                state_dir = os.path.join(app, ".qh")
+                deps_dir = os.path.join(state_dir, "deps")
+                os.makedirs(deps_dir, exist_ok=True)
                 if component == ".qh":
-                    shutil.rmtree(os.path.join(app, ".qh"))
-                    link = os.path.join(app, ".qh")
+                    shutil.rmtree(state_dir)
+                    link = state_dir
                 else:
-                    shutil.rmtree(os.path.join(app, ".qh", "deps"))
-                    link = os.path.join(app, ".qh", "deps")
+                    shutil.rmtree(deps_dir)
+                    link = deps_dir
                 try:
                     os.symlink(outside, link, target_is_directory=True)
                 except (OSError, NotImplementedError):
