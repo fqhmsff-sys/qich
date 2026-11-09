@@ -160,11 +160,13 @@ def write(root, entries):
     out = ["# Dihasilkan oleh qh. Jangan ubah manual.", "version = 1"]
     for name in sorted(entries):
         e = entries[name]
-        out.append("\\n[[package]]")
+        out.append("\n[[package]]")
         for k in ("name", "version", "source", "sha256", "archive_sha256"):
             if k in e:
                 out.append(f'{k} = "{e[k]}"')
-    content = "\\n".join(out) + "\\n"
+    content = "\n".join(out) + "\n"
+    if len(content.encode("utf-8")) > MAX_LOCK_BYTES:
+        raise QichError("qh.lock melampaui batas ukuran", "ResourceLimit", "P0155")
 
     fd, temporary = tempfile.mkstemp(prefix=".qich-lock-", dir=root)
     try:

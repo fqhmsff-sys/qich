@@ -322,7 +322,7 @@ class Packages(unittest.TestCase):
 
     def test_pkg_hash_rejects_symlink_root(self):
         lib = os.path.join(self.t, "hash-root")
-        mkpkg(lib, "hashroot", "1.0.0", "fn f() rtrn => 1\\n")
+        mkpkg(lib, "hashroot", "1.0.0", "fn f() rtrn => 1\n")
         link = os.path.join(self.t, "hash-root-link")
         try:
             os.symlink(lib, link, target_is_directory=True)
@@ -334,7 +334,7 @@ class Packages(unittest.TestCase):
     def test_lock_read_and_write_reject_symlink_without_touching_target(self):
         app = self.proj()
         outside = os.path.join(self.t, "outside-lock.toml")
-        original = b"marker = \"keep me\"\\n"
+        original = b"marker = \"keep me\"\n"
         with open(outside, "wb") as stream:
             stream.write(original)
         lock_path = os.path.join(app, "qh.lock")
@@ -355,13 +355,13 @@ class Packages(unittest.TestCase):
                 base = os.path.join(self.t, component)
                 os.makedirs(base, exist_ok=True)
                 lib = os.path.join(base, "mylib")
-                mkpkg(lib, "mylib", "1.0.0", "fn f() rtrn => 1\\n")
+                mkpkg(lib, "mylib", "1.0.0", "fn f() rtrn => 1\n")
                 app = os.path.join(base, "app")
                 created = qh(["new", "app"], base)
                 self.assertEqual(created.returncode, 0, created.stderr)
                 w(os.path.join(app, "qh.toml"),
-                  '[package]\\nname = "app"\\nversion = "1.0.0"\\n\\n'
-                  '[dependencies]\\nmylib = { path = "../mylib" }\\n')
+                  '[package]\nname = "app"\nversion = "1.0.0"\n\n'
+                  '[dependencies]\nmylib = { path = "../mylib" }\n')
                 outside = os.path.join(base, "outside-state")
                 os.makedirs(outside, exist_ok=True)
                 if component == ".qh":
@@ -382,13 +382,13 @@ class Packages(unittest.TestCase):
         base = os.path.join(self.t, "vendor-entry")
         os.makedirs(base)
         lib = os.path.join(base, "mylib")
-        mkpkg(lib, "mylib", "1.0.0", "fn f() rtrn => 1\\n")
+        mkpkg(lib, "mylib", "1.0.0", "fn f() rtrn => 1\n")
         app = os.path.join(base, "app")
         created = qh(["new", "app"], base)
         self.assertEqual(created.returncode, 0, created.stderr)
         w(os.path.join(app, "qh.toml"),
-          '[package]\\nname = "app"\\nversion = "1.0.0"\\n\\n'
-          '[dependencies]\\nmylib = { path = "../mylib" }\\n')
+          '[package]\nname = "app"\nversion = "1.0.0"\n\n'
+          '[dependencies]\nmylib = { path = "../mylib" }\n')
         entry = os.path.join(app, ".qh", "deps", "mylib")
         try:
             os.symlink(lib, entry, target_is_directory=True)
