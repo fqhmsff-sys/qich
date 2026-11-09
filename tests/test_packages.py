@@ -393,6 +393,7 @@ class Packages(unittest.TestCase):
           '[package]\nname = "app"\nversion = "1.0.0"\n\n'
           '[dependencies]\nmylib = { path = "../mylib" }\n')
         entry = os.path.join(app, ".qh", "deps", "mylib")
+        os.makedirs(os.path.dirname(entry), exist_ok=True)
         try:
             os.symlink(lib, entry, target_is_directory=True)
         except (OSError, NotImplementedError):
