@@ -1,13 +1,64 @@
 import hashlib
+import json
 import os
+import re
 import stat
 import tempfile
 import tomllib
 from ..compiler.diagnostics import QichError
+from .manifest import NAME_RE, RESERVED
 
 MAX_LOCK_BYTES = 16 * 1024 * 1024
+LOCK_VERSION = 1
+_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+_LOCK_FIELDS = {"name", "version", "source", "sha256", "archive_sha256"}
+_REQUIRED_LOCK_FIELDS = {"name", "version", "source", "sha256"}
 
 SKIP = {".qh", "build", ".git", "__pycache__", "qh.lock"}
+
+
+def _validate_lock_data(data):
+    """Validate the versioned lock schema and reject ambiguous duplicate packages."""
+    if not isinstance(data, dict) or set(data) - {"version", "package"}:
+        raise ValueError("struktur qh.lock tidak dikenal")
+    if type(data.get("version")) is not int or data["version"] != LOCK_VERSION:
+        raise ValueError("versi format qh.lock tidak didukung")
+
+    packages = data.get("package", [])
+    if not isinstance(packages, list):
+        raise ValueError("package harus berupa array")
+
+    entries = {}
+    for index, entry in enumerate(packages):
+        if not isinstance(entry, dict):
+            raise ValueError(f"entri package ke-{index + 1} harus berupa tabel")
+        if set(entry) - _LOCK_FIELDS:
+            raise ValueError(f"field package tidak dikenal pada entri ke-{index + 1}")
+        if not _REQUIRED_LOCK_FIELDS.issubset(entry):
+            raise ValueError(f"field package wajib tidak lengkap pada entri ke-{index + 1}")
+
+        name = entry["name"]
+        version = entry["version"]
+        source = entry["source"]
+        digest = entry["sha256"]
+        if not isinstance(name, str) or not NAME_RE.fullmatch(name) or name in RESERVED:
+            raise ValueError(f"nama package tidak valid pada entri ke-{index + 1}")
+        if name in entries:
+            raise ValueError(f"entri package duplikat di qh.lock: {name}")
+        if not isinstance(version, str) or not re.fullmatch(r"\\d+\\.\\d+\\.\\d+", version):
+            raise ValueError(f"versi package tidak valid di qh.lock: {name}")
+        if not isinstance(source, str) or not source or "\\x00" in source:
+            raise ValueError(f"sumber package tidak valid di qh.lock: {name}")
+        if not isinstance(digest, str) or not _DIGEST_RE.fullmatch(digest):
+            raise ValueError(f"SHA-256 package tidak valid di qh.lock: {name}")
+
+        archive_digest = entry.get("archive_sha256")
+        if "archive_sha256" in entry and (
+            not isinstance(archive_digest, str) or not _DIGEST_RE.fullmatch(archive_digest)
+        ):
+            raise ValueError(f"SHA-256 arsip package tidak valid di qh.lock: {name}")
+        entries[name] = entry
+    return entries
 
 
 def pkg_hash(d):
@@ -84,7 +135,7 @@ def pkg_hash(d):
                         if not chunk:
                             break
                         file_hash.update(chunk)
-                h.update(rel.encode("utf-8") + b"\0" + file_hash.digest())
+                h.update(rel.encode("utf-8") + b"\\0" + file_hash.digest())
             finally:
                 if fd is not None:
                     os.close(fd)
@@ -130,12 +181,14 @@ def read(root):
         raise QichError("qh.lock melampaui batas ukuran", "ResourceLimit", "P0154")
     try:
         data = tomllib.loads(raw.decode("utf-8"))
-        packages = data.get("package", [])
-        if not isinstance(packages, list):
-            raise ValueError("package harus berupa array")
-        return {entry["name"]: entry for entry in packages}
-    except (UnicodeDecodeError, tomllib.TOMLDecodeError, KeyError, TypeError, ValueError) as exc:
+        return _validate_lock_data(data)
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError, KeyError, TypeError, ValueError, RecursionError) as exc:
         raise QichError("qh.lock tidak valid", "ManifestError", "P0154") from exc
+
+
+def _toml_string(value):
+    # JSON basic-string escaping is compatible with TOML basic strings.
+    return json.dumps(value, ensure_ascii=False)
 
 
 def write(root, entries):
@@ -157,14 +210,20 @@ def write(root, entries):
     if current is not None and not stat.S_ISREG(current.st_mode):
         raise QichError("qh.lock harus berupa file reguler; symlink tidak akan ditimpa", "SecurityError", "P0155")
 
-    out = ["# Dihasilkan oleh qh. Jangan ubah manual.", "version = 1"]
+    try:
+        ordered_entries = [entries[name] for name in sorted(entries)]
+        _validate_lock_data({"version": LOCK_VERSION, "package": ordered_entries})
+    except (KeyError, TypeError, ValueError) as exc:
+        raise QichError("entri qh.lock tidak valid", "ManifestError", "P0155") from exc
+
+    out = ["# Dihasilkan oleh qh. Jangan ubah manual.", f"version = {LOCK_VERSION}"]
     for name in sorted(entries):
-        e = entries[name]
-        out.append("\n[[package]]")
-        for k in ("name", "version", "source", "sha256", "archive_sha256"):
-            if k in e:
-                out.append(f'{k} = "{e[k]}"')
-    content = "\n".join(out) + "\n"
+        entry = entries[name]
+        out.append("\\n[[package]]")
+        for key in ("name", "version", "source", "sha256", "archive_sha256"):
+            if key in entry:
+                out.append(f"{key} = {_toml_string(entry[key])}")
+    content = "\\n".join(out) + "\\n"
     if len(content.encode("utf-8")) > MAX_LOCK_BYTES:
         raise QichError("qh.lock melampaui batas ukuran", "ResourceLimit", "P0155")
 
