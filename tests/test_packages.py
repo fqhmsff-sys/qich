@@ -403,5 +403,53 @@ class Packages(unittest.TestCase):
         self.assertTrue(os.path.isdir(lib))
 
 
+
+    def test_lock_read_rejects_duplicate_package_names(self):
+        app = self.proj()
+        payload = (
+            'version = 1\n'
+            '[[package]]\nname = "demo"\nversion = "1.0.0"\n'
+            'source = "path:../demo"\nsha256 = "' + "a" * 64 + '"\n'
+            '[[package]]\nname = "demo"\nversion = "2.0.0"\n'
+            'source = "registry:local"\nsha256 = "' + "b" * 64 + '"\n'
+        )
+        with open(os.path.join(app, "qh.lock"), "w", encoding="utf-8") as stream:
+            stream.write(payload)
+        with self.assertRaises(QichError) as caught:
+            lock.read(app)
+        self.assertEqual(caught.exception.kind, "ManifestError")
+
+    def test_lock_read_rejects_unsupported_version_and_invalid_digest(self):
+        app = self.proj()
+        valid_entry = (
+            '[[package]]\nname = "demo"\nversion = "1.0.0"\n'
+            'source = "path:../demo"\nsha256 = "' + "a" * 64 + '"\n'
+        )
+        for payload in (
+            "version = 2\n" + valid_entry,
+            'version = 1\n[[package]]\nname = "demo"\nversion = "1.0.0"\n'
+            'source = "path:../demo"\nsha256 = "not-a-digest"\n',
+            'version = 1\n[[package]]\nname = "demo"\nversion = "1.0.0"\n'
+            'source = "path:../demo"\nsha256 = "' + "a" * 64 + '"\ntrusted = true\n',
+        ):
+            with self.subTest(payload=payload[:24]):
+                with open(os.path.join(app, "qh.lock"), "w", encoding="utf-8") as stream:
+                    stream.write(payload)
+                with self.assertRaises(QichError) as caught:
+                    lock.read(app)
+                self.assertEqual(caught.exception.kind, "ManifestError")
+
+    def test_lock_write_escapes_source_string_and_roundtrips(self):
+        app = self.proj()
+        source = 'path:../lib"' + chr(92) + '\n[[package]]\nname = "injected"'
+        entry = {
+            "name": "demo",
+            "version": "1.0.0",
+            "source": source,
+            "sha256": "a" * 64,
+        }
+        lock.write(app, {"demo": entry})
+        self.assertEqual(lock.read(app), {"demo": entry})
+
 if __name__ == "__main__":
     unittest.main()
