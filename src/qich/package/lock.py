@@ -45,9 +45,9 @@ def _validate_lock_data(data):
             raise ValueError(f"nama package tidak valid pada entri ke-{index + 1}")
         if name in entries:
             raise ValueError(f"entri package duplikat di qh.lock: {name}")
-        if not isinstance(version, str) or not re.fullmatch(r"\\d+\\.\\d+\\.\\d+", version):
+        if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version):
             raise ValueError(f"versi package tidak valid di qh.lock: {name}")
-        if not isinstance(source, str) or not source or "\\x00" in source:
+        if not isinstance(source, str) or not source or "\x00" in source:
             raise ValueError(f"sumber package tidak valid di qh.lock: {name}")
         if not isinstance(digest, str) or not _DIGEST_RE.fullmatch(digest):
             raise ValueError(f"SHA-256 package tidak valid di qh.lock: {name}")
@@ -135,7 +135,7 @@ def pkg_hash(d):
                         if not chunk:
                             break
                         file_hash.update(chunk)
-                h.update(rel.encode("utf-8") + b"\\0" + file_hash.digest())
+                h.update(rel.encode("utf-8") + b"\0" + file_hash.digest())
             finally:
                 if fd is not None:
                     os.close(fd)
@@ -219,11 +219,11 @@ def write(root, entries):
     out = ["# Dihasilkan oleh qh. Jangan ubah manual.", f"version = {LOCK_VERSION}"]
     for name in sorted(entries):
         entry = entries[name]
-        out.append("\\n[[package]]")
+        out.append("\n[[package]]")
         for key in ("name", "version", "source", "sha256", "archive_sha256"):
             if key in entry:
                 out.append(f"{key} = {_toml_string(entry[key])}")
-    content = "\\n".join(out) + "\\n"
+    content = "\n".join(out) + "\n"
     if len(content.encode("utf-8")) > MAX_LOCK_BYTES:
         raise QichError("qh.lock melampaui batas ukuran", "ResourceLimit", "P0155")
 
