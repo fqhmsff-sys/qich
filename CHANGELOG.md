@@ -22,3 +22,4 @@ Perubahan penting untuk pengguna Qich dicatat di sini.
 
 - Tolak direktori vendor `.qh/deps`, entri dependensi, akar hashing, dan tujuan ekstraksi ZIP yang berupa symlink; buat serta validasi direktori vendor tanpa mengikuti symlink.
 - Lindungi `qh.lock` dari symlink saat dibaca/ditulis, batasi ukurannya, dan tulis pembaruan secara atomik.
+- Validasi `qh.lock` versi 1 secara ketat: tolak versi/field yang tidak dikenal, entri paket duplikat, metadata malformed, dan digest SHA-256 yang tidak valid; serialisasi string TOML dengan escaping agar path tidak dapat menyisipkan tabel lock baru.
