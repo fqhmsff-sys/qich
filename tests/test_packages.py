@@ -1,4 +1,5 @@
 import hashlib, json, os, shutil, tempfile, unittest
+from unittest import mock
 from helpers import qh, ROOT
 from qich.package import lock, registry
 from qich.package.resolver import ensure_deps
@@ -450,6 +451,42 @@ class Packages(unittest.TestCase):
         }
         lock.write(app, {"demo": entry})
         self.assertEqual(lock.read(app), {"demo": entry})
+
+    def test_pkg_hash_fails_closed_on_directory_walk_error(self):
+        lib = os.path.join(self.t, "walk-denied")
+        mkpkg(lib, "walkdenied", "1.0.0", "fn f() rtrn => 1\\n")
+        with mock.patch("os.scandir", side_effect=PermissionError("denied")):
+            with self.assertRaises(QichError) as caught:
+                lock.pkg_hash(lib)
+        self.assertEqual(caught.exception.kind, "SecurityError")
+
+    def test_publish_fails_closed_on_directory_walk_error(self):
+        os.makedirs(self.reg, exist_ok=True)
+        lib = os.path.join(self.t, "publish-walk-denied")
+        mkpkg(lib, "walkdenied", "1.0.0", "fn f() rtrn => 1\\n")
+        with mock.patch("os.scandir", side_effect=PermissionError("denied")):
+            with self.assertRaises(QichError) as caught:
+                registry.publish(lib, "walkdenied", "1.0.0", self.reg)
+        self.assertEqual(caught.exception.kind, "SecurityError")
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "walkdenied-1.0.0.qhpkg")))
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "index.json")))
+        self.assertFalse(any(name.startswith(".qich-publish-") for name in os.listdir(self.reg)))
+
+    def test_lock_read_rejects_version_components_over_registry_limit(self):
+        app = self.proj()
+        payload = (
+            'version = 1\\n[[package]]\\nname = "demo"\\nversion = "'
+            + "1" * 10
+            + '.0.0"\\nsource = "path:../demo"\\nsha256 = "'
+            + "a" * 64
+            + '"\\n'
+        )
+        with open(os.path.join(app, "qh.lock"), "w", encoding="utf-8") as stream:
+            stream.write(payload)
+        with self.assertRaises(QichError) as caught:
+            lock.read(app)
+        self.assertEqual(caught.exception.kind, "ManifestError")
+
 
 if __name__ == "__main__":
     unittest.main()

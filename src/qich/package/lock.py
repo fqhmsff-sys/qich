@@ -10,6 +10,9 @@ from .manifest import NAME_RE, RESERVED
 
 MAX_LOCK_BYTES = 16 * 1024 * 1024
 LOCK_VERSION = 1
+MAX_VERSION_COMPONENT_DIGITS = 9
+_VERSION_PART = rf"\\d{{1,{MAX_VERSION_COMPONENT_DIGITS}}}"
+_VERSION_RE = re.compile(rf"^{_VERSION_PART}\\.{_VERSION_PART}\\.{_VERSION_PART}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _LOCK_FIELDS = {"name", "version", "source", "sha256", "archive_sha256"}
 _REQUIRED_LOCK_FIELDS = {"name", "version", "source", "sha256"}
@@ -61,8 +64,17 @@ def _validate_lock_data(data):
     return entries
 
 
+def _pkg_walk_error(exc):
+    raise QichError(
+        "direktori paket tidak dapat dibaca lengkap saat hashing",
+        "SecurityError",
+        "P0152",
+    ) from exc
+
+
 def pkg_hash(d):
     """Hash regular package files; reject links and special files before copying."""
+
     root = os.path.abspath(os.fspath(d))
     try:
         root_info = os.lstat(root)
@@ -72,7 +84,7 @@ def pkg_hash(d):
         raise QichError("akar paket harus berupa direktori nyata", "SecurityError", "P0152")
 
     h = hashlib.sha256()
-    for base, dirs, files in os.walk(root, topdown=True, followlinks=False):
+    for base, dirs, files in os.walk(root, topdown=True, followlinks=False, onerror=_pkg_walk_error):
         kept_dirs = []
         for name in dirs:
             if name in SKIP:

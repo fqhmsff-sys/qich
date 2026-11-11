@@ -20,6 +20,6 @@ Perubahan penting untuk pengguna Qich dicatat di sini.
 - Perbarui action CI checkout, setup-python, upload-artifact, dan release ke rilis berbasis Node 24 agar tidak bergantung pada runtime Node 20 yang deprecated.
 - Batasan tetap berlaku: checksum `.qhc` bukan tanda tangan digital; bridge Python bukan sandbox; platform selain Linux belum diverifikasi CI.
 
-- Tolak direktori vendor `.qh/deps`, entri dependensi, akar hashing, dan tujuan ekstraksi ZIP yang berupa symlink; buat serta validasi direktori vendor tanpa mengikuti symlink.
+- Gagal tertutup saat enumerasi pohon paket tidak lengkap: hashing dependensi dan publikasi registry tidak boleh menerima hash/arsip parsial jika traversal direktori menghasilkan error.\n- Samakan batas digit komponen versi `qh.lock` dengan registry agar versi lockfile malformed ditolak sebelum resolusi.\n- Tolak direktori vendor `.qh/deps`, entri dependensi, akar hashing, dan tujuan ekstraksi ZIP yang berupa symlink; buat serta validasi direktori vendor tanpa mengikuti symlink.
 - Lindungi `qh.lock` dari symlink saat dibaca/ditulis, batasi ukurannya, dan tulis pembaruan secara atomik.
 - Validasi `qh.lock` versi 1 secara ketat: tolak versi/field yang tidak dikenal, entri paket duplikat, metadata malformed, dan digest SHA-256 yang tidak valid; serialisasi string TOML dengan escaping agar path tidak dapat menyisipkan tabel lock baru.

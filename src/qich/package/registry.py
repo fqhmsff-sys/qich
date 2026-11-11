@@ -9,12 +9,11 @@ import tempfile
 import zipfile
 from ..compiler.diagnostics import QichError
 from .manifest import RESERVED, NAME_RE
-from .lock import SKIP
+from .lock import SKIP, MAX_VERSION_COMPONENT_DIGITS
 
 MAX_INDEX_BYTES = 16 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_PACKAGE_CONTENT_BYTES = 100 * 1024 * 1024
-MAX_VERSION_COMPONENT_DIGITS = 9
 
 
 def _vt(v): return tuple(int(x) for x in v.split("."))
@@ -156,8 +155,17 @@ class _BoundedWriter:
         return True
 
 
+def _publish_walk_error(exc):
+    raise QichError(
+        "direktori paket tidak dapat dibaca lengkap saat dipublikasikan",
+        "SecurityError",
+        "P0131",
+    ) from exc
+
+
 def _write_package_archive(pkg_dir, registry_dir, archive_path):
     """Build to a bounded temporary file, then create the immutable archive exclusively."""
+
     try:
         root_info = os.lstat(pkg_dir)
     except OSError as exc:
@@ -172,7 +180,7 @@ def _write_package_archive(pkg_dir, registry_dir, archive_path):
             writer = _BoundedWriter(raw, MAX_ARCHIVE_BYTES)
             total_uncompressed = 0
             with zipfile.ZipFile(writer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-                for base, dirs, files in os.walk(package_root, followlinks=False):
+                for base, dirs, files in os.walk(package_root, followlinks=False, onerror=_publish_walk_error):
                     dirs[:] = sorted(name for name in dirs if name not in SKIP)
                     for dirname in dirs:
                         path = os.path.join(base, dirname)

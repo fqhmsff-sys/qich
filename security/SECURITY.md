@@ -21,3 +21,8 @@ Registry lokal tetap harus berada di direktori yang hanya dapat ditulis oleh aku
 
 **Belum ada (jujur):** signed releases (PLANNED), isolasi proses untuk py: (in-process, bukan sandbox), batas memori proses, registry HTTPS/TUF, fuzzing berkelanjutan (hanya suite fuzz kecil), audit pihak ketiga.
 **Melaporkan kerentanan:** buka advisory privat ke pengelola proyek; format advisory registry: index.json → advisories → nama → [{id, summary, affected}].
+
+
+### Integritas enumerasi pohon paket
+
+Hash dependensi dan publikasi arsip harus gagal tertutup jika traversal direktori tidak dapat membaca salah satu subtree. Error dari enumerasi tidak boleh diabaikan karena hash atau arsip parsial dapat terlihat valid padahal tidak mewakili seluruh pohon paket. Regression tests mensimulasikan kegagalan enumerasi dan memastikan tidak ada arsip/index parsial yang dipublikasikan.
