@@ -122,7 +122,7 @@ def execute(program, *, max_steps=DEFAULT_MAX_STEPS, max_stack=DEFAULT_MAX_STACK
     A jump may target one instruction past the end to terminate cleanly.
     Positive step and stack budgets are mandatory.
     """
-    if isinstance(program, _PreparedProgram):
+    if type(program) is _PreparedProgram:
         constants = program.constants
         code = program.code
     else:
