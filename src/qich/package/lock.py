@@ -11,8 +11,8 @@ from .manifest import NAME_RE, RESERVED
 MAX_LOCK_BYTES = 16 * 1024 * 1024
 LOCK_VERSION = 1
 MAX_VERSION_COMPONENT_DIGITS = 9
-_VERSION_PART = rf"\\d{{1,{MAX_VERSION_COMPONENT_DIGITS}}}"
-_VERSION_RE = re.compile(rf"^{_VERSION_PART}\\.{_VERSION_PART}\\.{_VERSION_PART}$")
+_VERSION_PART = rf"\d{{1,{MAX_VERSION_COMPONENT_DIGITS}}}"
+_VERSION_RE = re.compile(rf"^{_VERSION_PART}\.{_VERSION_PART}\.{_VERSION_PART}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _LOCK_FIELDS = {"name", "version", "source", "sha256", "archive_sha256"}
 _REQUIRED_LOCK_FIELDS = {"name", "version", "source", "sha256"}
@@ -48,7 +48,7 @@ def _validate_lock_data(data):
             raise ValueError(f"nama package tidak valid pada entri ke-{index + 1}")
         if name in entries:
             raise ValueError(f"entri package duplikat di qh.lock: {name}")
-        if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        if not isinstance(version, str) or not _VERSION_RE.fullmatch(version):
             raise ValueError(f"versi package tidak valid di qh.lock: {name}")
         if not isinstance(source, str) or not source or "\x00" in source:
             raise ValueError(f"sumber package tidak valid di qh.lock: {name}")

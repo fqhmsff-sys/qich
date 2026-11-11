@@ -454,7 +454,7 @@ class Packages(unittest.TestCase):
 
     def test_pkg_hash_fails_closed_on_directory_walk_error(self):
         lib = os.path.join(self.t, "walk-denied")
-        mkpkg(lib, "walkdenied", "1.0.0", "fn f() rtrn => 1\\n")
+        mkpkg(lib, "walkdenied", "1.0.0", "fn f() rtrn => 1\n")
         with mock.patch("os.scandir", side_effect=PermissionError("denied")):
             with self.assertRaises(QichError) as caught:
                 lock.pkg_hash(lib)
@@ -463,7 +463,7 @@ class Packages(unittest.TestCase):
     def test_publish_fails_closed_on_directory_walk_error(self):
         os.makedirs(self.reg, exist_ok=True)
         lib = os.path.join(self.t, "publish-walk-denied")
-        mkpkg(lib, "walkdenied", "1.0.0", "fn f() rtrn => 1\\n")
+        mkpkg(lib, "walkdenied", "1.0.0", "fn f() rtrn => 1\n")
         with mock.patch("os.scandir", side_effect=PermissionError("denied")):
             with self.assertRaises(QichError) as caught:
                 registry.publish(lib, "walkdenied", "1.0.0", self.reg)
@@ -475,11 +475,11 @@ class Packages(unittest.TestCase):
     def test_lock_read_rejects_version_components_over_registry_limit(self):
         app = self.proj()
         payload = (
-            'version = 1\\n[[package]]\\nname = "demo"\\nversion = "'
+            'version = 1\n[[package]]\nname = "demo"\nversion = "'
             + "1" * 10
-            + '.0.0"\\nsource = "path:../demo"\\nsha256 = "'
+            + '.0.0"\nsource = "path:../demo"\nsha256 = "'
             + "a" * 64
-            + '"\\n'
+            + '"\n'
         )
         with open(os.path.join(app, "qh.lock"), "w", encoding="utf-8") as stream:
             stream.write(payload)
