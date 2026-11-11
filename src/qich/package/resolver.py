@@ -68,9 +68,20 @@ def ensure_deps(root, update=False, log=None):
         dest = os.path.join(vendor, name)
         dest_exists = _existing_real_directory(dest, f"direktori dependensi '{name}'")
         if isinstance(spec, dict):
-            src = os.path.realpath(os.path.join(base_dir, spec["path"]))
-            if not os.path.isdir(src):
-                raise QichError(f"path dependensi '{name}' tidak ada: {src}", "ResolveError", "P0141")
+            raw_src = os.path.abspath(os.path.join(base_dir, spec["path"]))
+            try:
+                source_info = os.lstat(raw_src)
+            except FileNotFoundError as exc:
+                raise QichError(f"path dependensi '{name}' tidak ada: {raw_src}", "ResolveError", "P0141") from exc
+            except OSError as exc:
+                raise QichError(f"path dependensi '{name}' tidak dapat diperiksa", "SecurityError", "P0152") from exc
+            if not stat.S_ISDIR(source_info.st_mode):
+                raise QichError(
+                    f"path dependensi '{name}' harus berupa direktori nyata, bukan symlink atau file lain",
+                    "SecurityError",
+                    "P0152",
+                )
+            src = os.path.realpath(raw_src)
             source = "path:" + os.path.relpath(src, root).replace(os.sep, "/")
             sha = lock.pkg_hash(src); dm = manifest.load(src); version = dm["package"]["version"]; arch = None
             copy_from = lambda: _copy(src, dest)

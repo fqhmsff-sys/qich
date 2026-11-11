@@ -10,6 +10,8 @@ Perubahan penting untuk pengguna Qich dicatat di sini.
 
 ## Unreleased
 
+- Tolak root path dependency yang berupa symlink sebelum realpath; pemeriksaan hash tidak boleh dilewati dengan mengkanonisasi symlink terlebih dahulu.
+
 - Perketat validasi versi artifact `.qhc` agar boolean tidak diterima sebagai versi integer.
 - Perbaiki tes keamanan artifact agar payload malformed diuji dengan header dan checksum yang valid.
 - Tambahkan pemeriksaan build wheel dan source distribution ke GitHub Actions.

@@ -290,6 +290,28 @@ class Packages(unittest.TestCase):
 
 
 
+    def test_path_dependency_rejects_symlink_root_before_copy(self):
+        base = os.path.join(self.t, "symlink-root")
+        os.makedirs(base)
+        lib = os.path.join(base, "real-lib")
+        mkpkg(lib, "mylib", "1.0.0", "fn f() rtrn => 1\n")
+        link = os.path.join(base, "linked-lib")
+        try:
+            os.symlink(lib, link, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink tidak didukung di lingkungan ini")
+
+        created = qh(["new", "app"], base)
+        self.assertEqual(created.returncode, 0, created.stderr)
+        app = os.path.join(base, "app")
+        w(os.path.join(app, "qh.toml"),
+          '[package]\nname = "app"\nversion = "1.0.0"\n\n'
+          '[dependencies]\nmylib = { path = "../linked-lib" }\n')
+        with self.assertRaises(QichError) as caught:
+            ensure_deps(app)
+        self.assertEqual(caught.exception.kind, "SecurityError")
+        self.assertFalse(os.path.lexists(os.path.join(app, ".qh", "deps", "mylib")))
+
     def test_path_dependency_rejects_symlink_members_before_copy(self):
         for kind in ("file", "directory"):
             with self.subTest(kind=kind):

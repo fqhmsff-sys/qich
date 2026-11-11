@@ -26,3 +26,8 @@ Registry lokal tetap harus berada di direktori yang hanya dapat ditulis oleh aku
 ### Integritas enumerasi pohon paket
 
 Hash dependensi dan publikasi arsip harus gagal tertutup jika traversal direktori tidak dapat membaca salah satu subtree. Error dari enumerasi tidak boleh diabaikan karena hash atau arsip parsial dapat terlihat valid padahal tidak mewakili seluruh pohon paket. Regression tests mensimulasikan kegagalan enumerasi dan memastikan tidak ada arsip/index parsial yang dipublikasikan.
+
+
+### Root path dependency
+
+Resolver memeriksa entri root path dependency dengan `lstat` sebelum `realpath`. Ini mencegah symlink pada root paket disamarkan sebagai direktori biasa sebelum pemeriksaan hash dan penyalinan. Regression test memastikan resolver menolak symlink root dan tidak membuat direktori vendor untuk dependensi tersebut.
