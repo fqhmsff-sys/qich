@@ -74,7 +74,7 @@ def main():
     print("runtime median   : %.2f ms (%d runs, validate each call)" % (runtime_median * 1000, args.repeat))
     print("prepared runtime : %.2f ms (%d runs, verify once)" % (prepared_runtime_median * 1000, args.repeat))
     print("validated instructions/sec : %.0f" % (len(compiled["code"]) / runtime_median))
-    print("prepared instructions/sec : %.0f" % (len(prepared["code"]) / prepared_runtime_median))
+    print("prepared instructions/sec : %.0f" % (len(prepared.code) / prepared_runtime_median))
     print("bytecode artifact: %s bytes" % format(artifact_size, ","))
     print("compile peak     : %s bytes (tracemalloc)" % format(peak_bytes, ","))
 
