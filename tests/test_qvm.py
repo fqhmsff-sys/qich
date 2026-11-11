@@ -8,7 +8,7 @@ from qich.qvm.bytecode import (
     BytecodeError, MAGIC, MAX_INTEGER_BITS, MAX_STACK, MAX_STRING, decode, encode,
 )
 from qich.qvm.compiler import CompileError, compile_program
-from qich.qvm.vm import VMError, execute
+from qich.qvm.vm import VMError, execute, prepare
 
 
 class QVMBytecodeTests(unittest.TestCase):
@@ -75,6 +75,42 @@ class QVMBytecodeTests(unittest.TestCase):
             with self.subTest(value_type=type(value).__name__):
                 with self.assertRaises(BytecodeError):
                     encode({"constants": [value], "code": [["HALT"]]})
+
+
+class QVMPreparedProgramTests(unittest.TestCase):
+    def test_prepare_snapshots_and_freezes_program(self):
+        source = {
+            "constants": [7],
+            "code": [["CONST", 0], ["HALT"]],
+        }
+        prepared = prepare(source)
+        source["constants"][0] = 99
+        source["code"][0][1] = 0
+        self.assertEqual(execute(prepared), 7)
+        self.assertEqual(execute(source), 99)
+        with self.assertRaises((AttributeError, TypeError)):
+            prepared.code[0][1] = 1
+        with self.assertRaises((AttributeError, TypeError)):
+            prepared.constants = (99,)
+
+    def test_prepared_and_validated_execution_match(self):
+        program = {
+            "constants": [4, 3],
+            "code": [["CONST", 0], ["CONST", 1], ["ADD"], ["HALT"]],
+        }
+        prepared = prepare(program)
+        self.assertEqual(execute(prepared), execute(program))
+        self.assertEqual(execute(prepared, max_steps=4), 7)
+        with self.assertRaises(VMError):
+            execute(prepared, max_steps=2)
+
+    def test_prepare_rejects_invalid_bytecode(self):
+        with self.assertRaises(VMError):
+            prepare({"constants": [], "code": [["UNKNOWN_OPCODE"]]})
+
+    def test_prepare_rejects_non_list_program_sections(self):
+        with self.assertRaises(VMError):
+            prepare({"constants": (), "code": [["HALT"]]})
 
 
 class QVMExecutorTests(unittest.TestCase):

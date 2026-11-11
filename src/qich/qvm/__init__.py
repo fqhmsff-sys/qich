@@ -2,9 +2,9 @@
 
 from .bytecode import BytecodeError, decode, encode
 from .compiler import CompileError, compile_program
-from .vm import VMError, execute
+from .vm import VMError, execute, prepare
 
 __all__ = [
     "BytecodeError", "CompileError", "VMError",
-    "compile_program", "decode", "encode", "execute",
+    "compile_program", "decode", "encode", "execute", "prepare",
 ]

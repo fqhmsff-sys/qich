@@ -1,4 +1,5 @@
 """Bounded, capability-free reference executor for QVM v1."""
+from dataclasses import dataclass
 import math
 
 from .bytecode import (
@@ -12,6 +13,40 @@ DEFAULT_MAX_STACK = MAX_STACK
 
 class VMError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedProgram:
+    """Immutable, validated snapshot for repeated execution."""
+
+    constants: tuple
+    code: tuple
+
+
+def prepare(program):
+    """Copy, validate, and freeze a QVM program for repeated execution.
+
+    Validation is performed against the copied snapshot. Later mutations to
+    caller-owned dictionaries/lists therefore cannot alter prepared code.
+    """
+    if type(program) is not dict or set(program) != {"constants", "code"}:
+        raise VMError("bytecode QVM tidak valid")
+    constants = program["constants"]
+    code = program["code"]
+    if type(constants) is not list or type(code) is not list:
+        raise VMError("bytecode QVM tidak valid")
+    snapshot = {
+        "constants": list(constants),
+        "code": [list(ins) if type(ins) is list else ins for ins in code],
+    }
+    try:
+        _validate(snapshot)
+    except BytecodeError as exc:
+        raise VMError("bytecode QVM tidak valid") from exc
+    return _PreparedProgram(
+        tuple(snapshot["constants"]),
+        tuple(tuple(ins) for ins in snapshot["code"]),
+    )
 
 
 def _number(value):
@@ -87,17 +122,21 @@ def execute(program, *, max_steps=DEFAULT_MAX_STEPS, max_stack=DEFAULT_MAX_STACK
     A jump may target one instruction past the end to terminate cleanly.
     Positive step and stack budgets are mandatory.
     """
-    try:
-        _validate(program)
-    except BytecodeError as exc:
-        raise VMError("bytecode QVM tidak valid") from exc
+    if isinstance(program, _PreparedProgram):
+        constants = program.constants
+        code = program.code
+    else:
+        try:
+            _validate(program)
+        except BytecodeError as exc:
+            raise VMError("bytecode QVM tidak valid") from exc
+        constants = program["constants"]
+        code = program["code"]
     if type(max_steps) is not int or isinstance(max_steps, bool) or max_steps <= 0:
         raise VMError("max_steps QVM harus integer positif")
     if type(max_stack) is not int or isinstance(max_stack, bool) or max_stack <= 0:
         raise VMError("max_stack QVM harus integer positif")
 
-    constants = program["constants"]
-    code = program["code"]
     stack = []
     locals_ = {}
     pc = 0
