@@ -130,7 +130,9 @@ fn qvm1_validate(program) {
         "NOT", "NEG", "JUMP", "JUMP_IF_FALSE", "HALT"
     ]
     let needs_operand = ["CONST", "LOAD_LOCAL", "STORE_LOCAL", "JUMP", "JUMP_IF_FALSE"]
-    for pc, ins in code {
+    let pc = 0
+    whl pc < len(code) {
+        let ins = code[pc]
         if type(ins) != "list" || len(ins) < 1 || len(ins) > 2 || type(ins[0]) != "str" {
             throw "instruksi QVM1 tidak valid"
         }
@@ -156,6 +158,7 @@ fn qvm1_validate(program) {
            (ins[1] < 0 || ins[1] > len(code)) {
             throw "target jump QVM1 di luar batas"
         }
+        pc += 1
     }
     qvm1_verify_stack(code)
     rtrn true
