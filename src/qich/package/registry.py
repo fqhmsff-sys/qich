@@ -164,7 +164,7 @@ def _publish_walk_error(exc):
 
 
 def _write_package_archive(pkg_dir, registry_dir, archive_path):
-    """Build to a bounded temporary file, then create the immutable archive exclusively."""
+    """Build a bounded ZIP from verified file descriptors, then publish exclusively."""
 
     try:
         root_info = os.lstat(pkg_dir)
@@ -201,11 +201,82 @@ def _write_package_archive(pkg_dir, registry_dir, archive_path):
                             raise QichError("file paket berubah saat dipublikasikan", "RegistryError", "P0131") from exc
                         if not stat.S_ISREG(info.st_mode):
                             raise QichError("symlink atau file khusus tidak diizinkan dalam paket", "SecurityError", "P0131")
-                        total_uncompressed += info.st_size
-                        if total_uncompressed > MAX_PACKAGE_CONTENT_BYTES:
-                            raise QichError("konten paket melampaui batas ekstraksi 100 MiB", "ResourceLimit", "P0131")
-                        arcname = os.path.relpath(path, package_root).replace(os.sep, "/")
-                        archive.write(path, arcname)
+
+                        nofollow = getattr(os, "O_NOFOLLOW", 0)
+                        flags = (
+                            os.O_RDONLY
+                            | getattr(os, "O_BINARY", 0)
+                            | nofollow
+                            | getattr(os, "O_NONBLOCK", 0)
+                        )
+                        try:
+                            source_fd = os.open(path, flags)
+                        except OSError as exc:
+                            raise QichError(
+                                "file paket berubah atau tidak dapat dibuka tanpa mengikuti symlink",
+                                "SecurityError",
+                                "P0131",
+                            ) from exc
+
+                        try:
+                            try:
+                                opened = os.fstat(source_fd)
+                                if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(info, opened):
+                                    raise QichError(
+                                        "file paket berubah atau bukan file reguler",
+                                        "SecurityError",
+                                        "P0131",
+                                    )
+                                if not nofollow:
+                                    current = os.lstat(path)
+                                    if stat.S_ISLNK(current.st_mode) or not os.path.samestat(current, opened):
+                                        raise QichError(
+                                            "file paket berubah menjadi symlink saat dibuka",
+                                            "SecurityError",
+                                            "P0131",
+                                        )
+                            except OSError as exc:
+                                raise QichError(
+                                    "file paket berubah saat dibuka untuk publikasi",
+                                    "SecurityError",
+                                    "P0131",
+                                ) from exc
+
+                            if opened.st_size < 0 or total_uncompressed + opened.st_size > MAX_PACKAGE_CONTENT_BYTES:
+                                raise QichError(
+                                    "konten paket melampaui batas ekstraksi 100 MiB",
+                                    "ResourceLimit",
+                                    "P0131",
+                                )
+
+                            source_stream = os.fdopen(source_fd, "rb")
+                            source_fd = None
+                            arcname = os.path.relpath(path, package_root).replace(os.sep, "/")
+                            zip_info = zipfile.ZipInfo(arcname)
+                            zip_info.compress_type = zipfile.ZIP_DEFLATED
+                            zip_info.create_system = 3
+                            zip_info.external_attr = (
+                                stat.S_IFREG | (opened.st_mode & 0o777)
+                            ) << 16
+                            file_bytes = 0
+                            with source_stream as source:
+                                with archive.open(zip_info, "w", force_zip64=True) as target:
+                                    while True:
+                                        chunk = source.read(64 * 1024)
+                                        if not chunk:
+                                            break
+                                        file_bytes += len(chunk)
+                                        if total_uncompressed + file_bytes > MAX_PACKAGE_CONTENT_BYTES:
+                                            raise QichError(
+                                                "konten paket melampaui batas ekstraksi 100 MiB",
+                                                "ResourceLimit",
+                                                "P0131",
+                                            )
+                                        target.write(chunk)
+                            total_uncompressed += file_bytes
+                        finally:
+                            if source_fd is not None:
+                                os.close(source_fd)
 
             raw.flush()
             os.fsync(raw.fileno())

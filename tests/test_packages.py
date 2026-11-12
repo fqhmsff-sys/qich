@@ -253,6 +253,85 @@ class Packages(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.reg, "expanded-1.0.0.qhpkg")))
         self.assertFalse(os.path.exists(os.path.join(self.reg, "index.json")))
 
+    def test_publish_rejects_file_swapped_to_symlink_after_lstat(self):
+        lib = os.path.join(self.t, "race"); mkpkg(lib, "race", "1.0.0", "fn f() rtrn => 1\n")
+        target = os.path.join(lib, "src", "race.bin")
+        outside = os.path.join(self.t, "outside.bin")
+        with open(target, "wb") as stream:
+            stream.write(b"inside")
+        with open(outside, "wb") as stream:
+            stream.write(b"outside-secret")
+        original_lstat = os.lstat
+        swapped = False
+
+        def lstat_then_swap(path, *args, **kwargs):
+            nonlocal swapped
+            info = original_lstat(path, *args, **kwargs)
+            if os.path.abspath(os.fspath(path)) == os.path.abspath(target) and not swapped:
+                swapped = True
+                os.unlink(target)
+                os.symlink(outside, target)
+            return info
+
+        with mock.patch("qich.package.registry.os.lstat", side_effect=lstat_then_swap):
+            with self.assertRaises(QichError) as caught:
+                registry.publish(lib, "race", "1.0.0", self.reg)
+        self.assertTrue(swapped)
+        self.assertEqual(caught.exception.kind, "SecurityError")
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "race-1.0.0.qhpkg")))
+        with open(outside, "rb") as stream:
+            self.assertEqual(stream.read(), b"outside-secret")
+        self.assertFalse(any(name.startswith(".qich-publish-") for name in os.listdir(self.reg)))
+
+    def test_publish_enforces_uncompressed_limit_on_streamed_bytes(self):
+        lib = os.path.join(self.t, "growing"); mkpkg(lib, "growing", "1.0.0", "fn f() rtrn => 1\n")
+        target = os.path.join(lib, "src", "zzz-growth.bin")
+        with open(target, "wb") as stream:
+            stream.write(b"x")
+        target_info = os.stat(target)
+        original_fdopen = os.fdopen
+        grown = False
+
+        class GrowingReader:
+            def __init__(self, stream):
+                self.stream = stream
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return self.stream.__exit__(*exc)
+
+            def read(self, size=-1):
+                nonlocal grown
+                if not grown:
+                    with open(target, "ab") as output:
+                        output.write(b"z" * 1024)
+                    grown = True
+                return self.stream.read(size)
+
+        def fdopen_with_growth(fd, *args, **kwargs):
+            opened = os.fstat(fd)
+            mode = args[0] if args else kwargs.get("mode", "r")
+            stream = original_fdopen(fd, *args, **kwargs)
+            if mode == "rb" and os.path.samestat(opened, target_info):
+                return GrowingReader(stream)
+            return stream
+
+        old_limit = registry.MAX_PACKAGE_CONTENT_BYTES
+        try:
+            registry.MAX_PACKAGE_CONTENT_BYTES = 512
+            with mock.patch("qich.package.registry.os.fdopen", side_effect=fdopen_with_growth):
+                with self.assertRaises(QichError) as caught:
+                    registry.publish(lib, "growing", "1.0.0", self.reg)
+        finally:
+            registry.MAX_PACKAGE_CONTENT_BYTES = old_limit
+        self.assertTrue(grown)
+        self.assertEqual(caught.exception.kind, "ResourceLimit")
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "growing-1.0.0.qhpkg")))
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "index.json")))
+        self.assertFalse(any(name.startswith(".qich-publish-") for name in os.listdir(self.reg)))
+
     def test_publish_rejects_symlink_package_members(self):
         lib = os.path.join(self.t, "symlinked"); mkpkg(lib, "symlinked", "1.0.0", "fn f() rtrn => 1\n")
         outside = os.path.join(self.t, "outside.qh")

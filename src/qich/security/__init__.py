@@ -10,7 +10,13 @@ import zipfile
 PY_DENY = {"os", "sys", "subprocess", "ctypes", "shutil", "socket", "importlib", "builtins",
            "pickle", "marshal", "multiprocessing", "signal", "pty", "resource", "gc", "code",
            "codeop", "runpy", "ensurepip", "pip", "posix", "nt", "_thread", "threading"}
-JS_DENY = {"child_process", "cluster", "vm", "worker_threads", "inspector", "repl"}
+JS_DENY = {
+    "assert", "async_hooks", "child_process", "cluster", "dgram",
+    "diagnostics_channel", "dns", "fs", "http", "http2", "https",
+    "inspector", "module", "net", "os", "perf_hooks", "process",
+    "readline", "repl", "sqlite", "tls", "trace_events", "tty",
+    "v8", "vm", "wasi", "worker_threads",
+}
 SECRET_RE = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)", re.I)
 
 
@@ -23,8 +29,15 @@ class Policy:
     def check_bridge(self, eco, lib):
         if self.allow_all or f"{eco}:{lib}" in self.allow:
             return True
-        root = lib.split(".")[0].replace("node:", "")
-        deny = PY_DENY if eco == "py" else JS_DENY if eco == "js" else set()
+        if eco == "js":
+            root = lib.removeprefix("node:").split("/", 1)[0]
+            deny = JS_DENY
+        elif eco == "py":
+            root = lib.split(".", 1)[0]
+            deny = PY_DENY
+        else:
+            root = lib
+            deny = set()
         if root in deny:
             return False
         return True

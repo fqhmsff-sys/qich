@@ -10,6 +10,10 @@ Perubahan penting untuk pengguna Qich dicatat di sini.
 
 ## Unreleased
 
+- Integrasikan QVM1 versioned bytecode, verifier, reference executor, subset compiler, prepared execution, differential corpus, dan benchmark ke branch Qich v2. QVM tetap EXPERIMENTAL dan masih berjalan di Python; belum ada klaim native/self-hosted.
+- Perketat publikasi paket dengan membuka file sumber melalui descriptor no-follow, mencocokkan identitas file dengan fstat, dan membatasi jumlah byte aktual yang di-stream ke ZIP agar pergantian symlink atau pertumbuhan file setelah stat tidak melewati batas.
+- Normalisasi denylist JavaScript untuk builtin Node, termasuk awalan node: dan subpath, serta tambah regression tests protokol bridge.
+
 - Tolak root path dependency yang berupa symlink sebelum realpath; pemeriksaan hash tidak boleh dilewati dengan mengkanonisasi symlink terlebih dahulu.
 
 - Perketat validasi versi artifact `.qhc` agar boolean tidak diterima sebagai versi integer.

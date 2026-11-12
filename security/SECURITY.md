@@ -31,3 +31,10 @@ Hash dependensi dan publikasi arsip harus gagal tertutup jika traversal direktor
 ### Root path dependency
 
 Resolver memeriksa entri root path dependency dengan `lstat` sebelum `realpath`. Ini mencegah symlink pada root paket disamarkan sebagai direktori biasa sebelum pemeriksaan hash dan penyalinan. Regression test memastikan resolver menolak symlink root dan tidak membuat direktori vendor untuk dependensi tersebut.
+
+
+## Publikasi paket dan batas resource
+
+Publikasi arsip membuka setiap file sumber dengan descriptor no-follow bila platform mendukungnya, memeriksa tipe dan identitas inode melalui fstat, lalu menyalin konten secara streaming. Batas konten tidak hanya bergantung pada ukuran dari stat: jumlah byte aktual dihitung saat dibaca sehingga file yang tumbuh setelah pemeriksaan awal tetap dibatasi. Batas ukuran arsip terkompresi tetap ditegakkan oleh bounded writer.
+
+Batas yang masih tersisa: traversal ancestor direktori belum sepenuhnya memakai directory descriptor/openat, sehingga race pada komponen direktori masih memerlukan penguatan khusus. File reguler yang dimodifikasi in-place secara bersamaan dapat menghasilkan snapshot isi yang tidak deterministik, walau byte aktual tetap dibatasi dan digest dihitung dari arsip yang diterbitkan.

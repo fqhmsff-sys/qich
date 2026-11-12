@@ -12,8 +12,9 @@ Legenda: **TESTED** = ada test otomatis yang lulus di lingkungan pengembangan (L
 | Pattern matching, Result + `?`, try/catch/throw, async/await (thread) | TESTED | |
 | Modul `use mod:`/`pkg:`, impor melingkar terdeteksi | TESTED | |
 | Compiler → `.qhc` (AST ter-serialisasi + SHA-256, diverifikasi saat load) | TESTED | **bukan** bytecode VM atau native; lihat DECISIONS |
-| Bytecode VM, kompilasi native, GC sendiri | PLANNED | memori dikelola Python (aman: tanpa UB, indeks dicek) |
-| Core compiler/runtime dalam Rust | PLANNED / UNAVAILABLE di sandbox | tidak ada `rustc` di lingkungan pengembangan; implementasi referensi ini ditulis Python |
+| QVM1 bytecode versioned + reference stack executor | EXPERIMENTAL | compiler subset AST → QVM1 dan executor tersedia; masih berjalan di Python; lihat BOOTSTRAP.md |
+| Native compiler/runtime, self-hosted compiler, GC sendiri | PLANNED | toolchain mandiri belum tersedia; memori reference runtime masih dikelola Python |
+| Compiler/runtime Qich-native dan self-hosted | PLANNED | source akhir wajib Qich; bootstrap seed C/Rust hanya build-time sementara, bukan runtime host permanen |
 | Formatter (indentasi + spasi, idempoten, menjaga komentar), `qh doc` | TESTED | formatter berbasis baris, bukan pretty-printer AST |
 
 ## Toolchain
@@ -43,3 +44,8 @@ Linux: TESTED. Windows, macOS: kode portabel (Python/stdlib) tetapi **tidak diuj
 
 ## Keamanan
 Lihat `security/SECURITY.md` — tiap klaim ada test. Belum ada: signed releases (PLANNED), batas memori proses, isolasi proses untuk `py:`, registry HTTPS.
+
+
+## Kemandirian
+
+Qich **belum mandiri**. QVM1, compiler subset, verifier, dan executor masih reference implementation Python berstatus EXPERIMENTAL. Compiler utama, runtime/VM, package tooling, dan minimum stdlib masih membutuhkan Python sebagai host. Tenggat final kemandirian adalah **14 Desember 2026**; gerbang penerimaan dan tahapan bootstrap ada di [BOOTSTRAP.md](BOOTSTRAP.md). Tidak ada klaim self-hosting sebelum clean-room build tanpa Python/Node dan stage0 → stage1 → stage2 lulus.
