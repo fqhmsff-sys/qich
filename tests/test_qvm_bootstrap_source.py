@@ -84,6 +84,26 @@ class QichSourceQVMTests(unittest.TestCase):
                     to_str(execute(program)),
                 )
 
+    def test_qich_source_equality_matches_reference_type_rules(self):
+        cases = [
+            ([True, 1], "EQ", False),
+            ([True, 1], "NE", True),
+            ([False, 0], "EQ", False),
+            ([False, 0], "NE", True),
+            ([1, 1.0], "EQ", True),
+            (["1", 1], "EQ", False),
+            ([None, False], "EQ", False),
+        ]
+        for constants, opcode, expected in cases:
+            program = {
+                "constants": constants,
+                "code": [["CONST", 0], ["CONST", 1], [opcode], ["HALT"]],
+            }
+            with self.subTest(constants=constants, opcode=opcode):
+                reference = execute(program)
+                self.assertIs(reference, expected)
+                self.assertEqual(self.qich_execute(program), to_str(reference))
+
     def test_qich_source_verifier_rejects_static_stack_underflow(self):
         with self.assertRaises(QichError):
             self.qich_execute({"constants": [], "code": [["POP"], ["HALT"]]})
