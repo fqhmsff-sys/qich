@@ -165,16 +165,27 @@ fn qvm1_validate(program) {
 }
 
 fn qvm1_binary(op, left, right) {
-    let left_num = type(left) == "int" || type(left) == "float"
-    let right_num = type(right) == "int" || type(right) == "float"
-    if op == "EQ" {
-        rtrn left == right
-    }
-    if op == "NE" {
-        rtrn left != right
+    let left_kind = type(left)
+    let right_kind = type(right)
+    let left_num = left_kind == "int" || left_kind == "float"
+    let right_num = right_kind == "int" || right_kind == "float"
+    if op == "EQ" || op == "NE" {
+        // Match Qich q_eq: bool is never equal to an integer, while int/float
+        // numeric equality remains cross-type. Other QVM primitives compare
+        // only when their runtime types match.
+        let equal = false
+        if left_kind == "bool" || right_kind == "bool" {
+            equal = left_kind == right_kind && left == right
+        } else if left_num && right_num {
+            equal = left == right
+        } else if left_kind == right_kind {
+            equal = left == right
+        }
+        if op == "EQ" { rtrn equal }
+        rtrn !equal
     }
     if op == "LT" || op == "LE" || op == "GT" || op == "GE" {
-        if !(left_num && right_num) && !(type(left) == "str" && type(right) == "str") {
+        if !(left_num && right_num) && !(left_kind == "str" && right_kind == "str") {
             throw "operand perbandingan QVM1 tidak kompatibel"
         }
         if op == "LT" { rtrn left < right }
@@ -184,7 +195,7 @@ fn qvm1_binary(op, left, right) {
     }
     if op == "ADD" {
         if left_num && right_num { rtrn qvm1_check_value(left + right) }
-        if type(left) == "str" && type(right) == "str" {
+        if left_kind == "str" && right_kind == "str" {
             rtrn qvm1_check_value(left + right)
         }
         throw "ADD QVM1 membutuhkan dua angka atau dua string"
@@ -195,13 +206,13 @@ fn qvm1_binary(op, left, right) {
     }
     if op == "MUL" {
         if left_num && right_num { rtrn qvm1_check_value(left * right) }
-        if type(left) == "str" && type(right) == "int" {
+        if left_kind == "str" && right_kind == "int" {
             if len(left.to_bytes()) * max(right, 0) > QVM1_MAX_STRING {
                 throw "hasil string QVM1 terlalu besar"
             }
             rtrn qvm1_check_value(left * right)
         }
-        if type(right) == "str" && type(left) == "int" {
+        if right_kind == "str" && left_kind == "int" {
             if len(right.to_bytes()) * max(left, 0) > QVM1_MAX_STRING {
                 throw "hasil string QVM1 terlalu besar"
             }
