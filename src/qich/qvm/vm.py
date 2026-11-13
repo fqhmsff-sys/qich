@@ -126,12 +126,11 @@ def execute(program, *, max_steps=DEFAULT_MAX_STEPS, max_stack=DEFAULT_MAX_STACK
         constants = program.constants
         code = program.code
     else:
-        try:
-            _validate(program)
-        except BytecodeError as exc:
-            raise VMError("bytecode QVM tidak valid") from exc
-        constants = program["constants"]
-        code = program["code"]
+        # Snapshot before validation so caller mutation cannot change the
+        # bytecode state that is executed after verification.
+        prepared = prepare(program)
+        constants = prepared.constants
+        code = prepared.code
     if type(max_steps) is not int or isinstance(max_steps, bool) or max_steps <= 0:
         raise VMError("max_steps QVM harus integer positif")
     if type(max_stack) is not int or isinstance(max_stack, bool) or max_stack <= 0:

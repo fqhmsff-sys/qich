@@ -2,6 +2,7 @@
 import hashlib
 import random
 import unittest
+from unittest.mock import patch
 
 from qich.compiler import parse
 from qich.qvm.bytecode import (
@@ -9,6 +10,7 @@ from qich.qvm.bytecode import (
 )
 from qich.qvm.compiler import CompileError, compile_program
 from qich.qvm.vm import VMError, execute, prepare
+import qich.qvm.vm as qvm_vm
 
 
 class QVMBytecodeTests(unittest.TestCase):
@@ -111,6 +113,24 @@ class QVMPreparedProgramTests(unittest.TestCase):
     def test_prepare_rejects_non_list_program_sections(self):
         with self.assertRaises(VMError):
             prepare({"constants": (), "code": [["HALT"]]})
+
+    def test_one_shot_execution_uses_the_validated_snapshot(self):
+        source = {
+            "constants": [7],
+            "code": [["CONST", 0], ["HALT"]],
+        }
+        validate = qvm_vm._validate
+
+        def mutate_caller_program_after_validation(candidate):
+            validate(candidate)
+            source["code"][0][1] = 99
+
+        with patch.object(
+            qvm_vm, "_validate",
+            side_effect=mutate_caller_program_after_validation,
+        ):
+            self.assertEqual(qvm_vm.execute(source), 7)
+        self.assertEqual(source["code"][0][1], 99)
 
 
 class QVMExecutorTests(unittest.TestCase):

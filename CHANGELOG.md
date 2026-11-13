@@ -30,3 +30,4 @@ Perubahan penting untuk pengguna Qich dicatat di sini.
 - Lindungi `qh.lock` dari symlink saat dibaca/ditulis, batasi ukurannya, dan tulis pembaruan secara atomik.
 - Validasi `qh.lock` versi 1 secara ketat: tolak versi/field yang tidak dikenal, entri paket duplikat, metadata malformed, dan digest SHA-256 yang tidak valid; serialisasi string TOML dengan escaping agar path tidak dapat menyisipkan tabel lock baru.
 - Perbaiki kesetaraan opcode QVM1 pada source bootstrap Qich agar boolean tidak dianggap sama dengan integer, selaras dengan semantik `q_eq` pada reference runtime; tambahkan differential regression cases untuk EQ/NE, int-float, string-number, dan nil-bool.
+- Eksekusi QVM one-shot sekarang memverifikasi snapshot immutable, bukan objek mutable milik caller, untuk menutup celah perubahan bytecode di antara validasi dan eksekusi; benchmark membedakan biaya snapshot+validasi dari prepared execution.
