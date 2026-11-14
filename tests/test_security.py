@@ -35,6 +35,22 @@ class Security(unittest.TestCase):
                 safe_extract_zip(b.getvalue(), d)
             self.assertFalse(os.path.exists(os.path.join(outside, "pwned.txt")))
 
+
+    def test_zip_rejects_symlink_destination_root(self):
+        for dangling in (False, True):
+            with self.subTest(dangling=dangling), tempfile.TemporaryDirectory() as root:
+                outside = os.path.join(root, "outside-target")
+                if not dangling:
+                    os.makedirs(outside)
+                link = os.path.join(root, "redirect")
+                try:
+                    os.symlink(outside, link, target_is_directory=True)
+                except (OSError, NotImplementedError):
+                    self.skipTest("symlink tidak didukung di lingkungan ini")
+                with self.assertRaises(ValueError):
+                    safe_extract_zip(self._zip_one("pwned.txt"), link)
+                self.assertFalse(os.path.exists(os.path.join(outside, "pwned.txt")))
+
     def test_bridge_denylist_and_allow(self):
         with self.assertRaises(QE) as c: run("use py:os")
         self.assertEqual(c.exception.kind, "SecurityError")
@@ -143,6 +159,64 @@ class Security(unittest.TestCase):
         with self.assertRaises(QE): run('use c:c\nlet f = c.fn("strlen", ["ptr"], "usize")')
         with self.assertRaises(QE): run('use c:c\nlet f = c.fn("strlen", ["str"], "usize")\nf(123)')
         with self.assertRaises(QE): run('use c:ffi\nffi.open("/tmp/x.so")')
+
+
+    def test_zip_rejects_windows_ads_device_names_and_ambiguous_paths(self):
+        bad_names = (
+            "C:/escape.txt",
+            "dir/file.txt:secret",
+            "NUL.txt",
+            "NUL .txt",
+            "dir/CON",
+            "trailing./file.qh",
+            "dir/./file.qh",
+            "dir//file.qh",
+            "COM¹.txt",
+            "COM²",
+            "COM³.log",
+            "LPT¹",
+            "LPT².txt",
+            "LPT³",
+            "CONIN$",
+            "CONOUT$.log",
+        )
+        for name in bad_names:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as d:
+                with self.assertRaises(ValueError):
+                    safe_extract_zip(self._zip_one(name), d)
+
+    def _zip_one(self, name):
+        b = io.BytesIO()
+        with zipfile.ZipFile(b, "w") as archive:
+            archive.writestr(name, b"payload")
+        return b.getvalue()
+
+    def test_zip_rejects_casefold_and_separator_collisions(self):
+        b = io.BytesIO()
+        with zipfile.ZipFile(b, "w") as archive:
+            archive.writestr("pkg/file.qh", b"one")
+            archive.writestr("PKG\\FILE.QH", b"two")
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(ValueError):
+                safe_extract_zip(b.getvalue(), d)
+
+    def test_zip_rejects_file_directory_conflicts(self):
+        b = io.BytesIO()
+        with zipfile.ZipFile(b, "w") as archive:
+            archive.writestr("pkg", b"file")
+            archive.writestr("pkg/module.qh", b"child")
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(ValueError):
+                safe_extract_zip(b.getvalue(), d)
+
+    def test_zip_normalizes_backslash_separators(self):
+        b = io.BytesIO()
+        with zipfile.ZipFile(b, "w") as archive:
+            archive.writestr("pkg\\module.qh", b"source")
+        with tempfile.TemporaryDirectory() as d:
+            safe_extract_zip(b.getvalue(), d)
+            with open(os.path.join(d, "pkg", "module.qh"), "rb") as f:
+                self.assertEqual(f.read(), b"source")
 
 
 if __name__ == "__main__":

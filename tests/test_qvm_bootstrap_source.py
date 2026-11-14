@@ -1,0 +1,137 @@
+import os
+import unittest
+
+from helpers import ROOT, run
+from qich.compiler.diagnostics import QichError
+from qich.qvm.vm import VMError, execute
+from qich.runtime.values import to_str
+
+
+def qich_literal(value):
+    if value is None:
+        return "nil"
+    if type(value) is bool:
+        return "true" if value else "false"
+    if type(value) is str:
+        import json
+        return json.dumps(value, ensure_ascii=False)
+    if type(value) in (int, float):
+        return repr(value)
+    if type(value) is list:
+        return "[" + ", ".join(qich_literal(item) for item in value) + "]"
+    if type(value) is dict:
+        return "{" + ", ".join(
+            qich_literal(key) + ": " + qich_literal(item)
+            for key, item in value.items()
+        ) + "}"
+    raise TypeError(type(value).__name__)
+
+
+class QichSourceQVMTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        path = os.path.join(ROOT, "bootstrap", "qvm1.qh")
+        with open(path, encoding="utf-8") as stream:
+            cls.bootstrap_source = stream.read()
+
+    def qich_execute(self, program, max_steps=1000000, max_stack=65536):
+        source = (
+            self.bootstrap_source
+            + "\nlet _program = " + qich_literal(program)
+            + "\nprint(qvm1_execute(_program, " + str(max_steps) + ", " + str(max_stack) + "))\n"
+        )
+        return run(source).rstrip("\n")
+
+    def test_qich_source_executor_matches_reference_corpus(self):
+        corpus = [
+            {
+                "constants": [7, 5, 2],
+                "code": [
+                    ["CONST", 0], ["CONST", 1], ["ADD"],
+                    ["CONST", 2], ["MUL"], ["CONST", 0], ["GT"], ["HALT"],
+                ],
+            },
+            {
+                "constants": [False, "wrong", "right"],
+                "code": [
+                    ["CONST", 0], ["JUMP_IF_FALSE", 4],
+                    ["CONST", 1], ["JUMP", 5], ["CONST", 2], ["HALT"],
+                ],
+            },
+            {
+                "constants": [7, 3],
+                "code": [
+                    ["CONST", 0], ["STORE_LOCAL", 0],
+                    ["LOAD_LOCAL", 0], ["CONST", 1], ["ADD"], ["HALT"],
+                ],
+            },
+            {
+                "constants": ["q", 3],
+                "code": [["CONST", 0], ["CONST", 1], ["MUL"], ["HALT"]],
+            },
+            {
+                "constants": [True, 9, 4],
+                "code": [
+                    ["CONST", 0], ["JUMP_IF_FALSE", 4],
+                    ["CONST", 1], ["JUMP", 5], ["CONST", 2], ["HALT"],
+                ],
+            },
+        ]
+        for program in corpus:
+            with self.subTest(program=program):
+                self.assertEqual(
+                    self.qich_execute(program),
+                    to_str(execute(program)),
+                )
+
+    def test_qich_source_equality_matches_reference_type_rules(self):
+        cases = [
+            ([True, 1], "EQ", False),
+            ([True, 1], "NE", True),
+            ([False, 0], "EQ", False),
+            ([False, 0], "NE", True),
+            ([1, 1.0], "EQ", True),
+            (["1", 1], "EQ", False),
+            ([None, False], "EQ", False),
+        ]
+        for constants, opcode, expected in cases:
+            program = {
+                "constants": constants,
+                "code": [["CONST", 0], ["CONST", 1], [opcode], ["HALT"]],
+            }
+            with self.subTest(constants=constants, opcode=opcode):
+                reference = execute(program)
+                self.assertIs(reference, expected)
+                self.assertEqual(self.qich_execute(program), to_str(reference))
+
+    def test_qich_source_integer_limit_matches_reference_bit_limit(self):
+        largest = (1 << 13000) - 1
+        too_large = 1 << 13000
+        for value in (largest, -largest):
+            program = {"constants": [value], "code": [["CONST", 0], ["HALT"]]}
+            with self.subTest(bit_length=value.bit_length()):
+                self.assertEqual(execute(program), value)
+                self.assertEqual(self.qich_execute(program), to_str(value))
+        for value in (too_large, -too_large):
+            program = {"constants": [value], "code": [["CONST", 0], ["HALT"]]}
+            with self.subTest(bit_length=value.bit_length()):
+                with self.assertRaises(VMError):
+                    execute(program)
+                with self.assertRaises(QichError):
+                    self.qich_execute(program)
+
+    def test_qich_source_verifier_rejects_static_stack_underflow(self):
+        with self.assertRaises(QichError):
+            self.qich_execute({"constants": [], "code": [["POP"], ["HALT"]]})
+
+    def test_qich_source_executor_enforces_step_budget(self):
+        with self.assertRaises(QichError):
+            self.qich_execute({"constants": [], "code": [["JUMP", 0]]}, max_steps=10)
+
+    def test_qich_source_executor_rejects_uninitialized_local(self):
+        with self.assertRaises(QichError):
+            self.qich_execute({"constants": [], "code": [["LOAD_LOCAL", 0], ["HALT"]]})
+
+    def test_qich_source_executor_rejects_unknown_opcode(self):
+        with self.assertRaises(QichError):
+            self.qich_execute({"constants": [], "code": [["EVAL_PYTHON"]]})

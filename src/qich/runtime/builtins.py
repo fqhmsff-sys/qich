@@ -212,7 +212,7 @@ def install(I):
     B = {"len": len, "decode": lambda b: b.decode("utf-8", errors="replace"), "hex": lambda b: b.hex(),
          "to_list": list}
     R = {"len": len, "to_list": list, "contains": lambda r, x: type(x) is int and r.start <= x < r.end}
-    I.methods = {str: S, list: L, dict: M, bytes: B, RangeVal: R}
+    I.methods = {int: {"bit_length": int.bit_length}, str: S, list: L, dict: M, bytes: B, RangeVal: R}
 
     # ---------------- Result methods
     def r_unwrap(r):

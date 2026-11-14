@@ -1,0 +1,301 @@
+// QVM1 source prototype written in Qich.
+// Scope: in-memory verifier + capability-free executor for decoded QVM1 maps.
+// This is executed by the Python reference runtime today; it is NOT a native VM.
+use std:math
+
+let QVM1_MAX_CONSTANTS = 100000
+let QVM1_MAX_INSTRUCTIONS = 100000
+let QVM1_MAX_STRING = 1048576
+let QVM1_MAX_STACK = 65536
+let QVM1_MAX_INTEGER_BITS = 13000
+
+fn qvm1_check_value(value) {
+    let kind = type(value)
+    if kind == "float" {
+        if math.is_nan(value) || value == math.inf || value == -math.inf {
+            throw "float QVM1 harus finite"
+        }
+    }
+    // Match the reference VM's exact arbitrary-precision integer limit.
+    if kind == "int" && value.bit_length() > QVM1_MAX_INTEGER_BITS {
+        throw "integer QVM1 terlalu besar"
+    }
+    if kind == "str" && len(value.to_bytes()) > QVM1_MAX_STRING {
+        throw "string QVM1 terlalu besar"
+    }
+    rtrn value
+}
+
+fn qvm1_push(stack, value, max_stack) {
+    if len(stack) >= max_stack {
+        throw "batas stack QVM1 terlampaui"
+    }
+    stack.push(qvm1_check_value(value))
+}
+
+fn qvm1_pop(stack) {
+    if len(stack) == 0 {
+        throw "stack QVM1 kosong"
+    }
+    rtrn stack.pop()
+}
+
+fn qvm1_enqueue(heights, pending, target, height) {
+    if heights.has(target) {
+        if heights[target] != height {
+            throw "tinggi stack QVM1 tidak konsisten pada control-flow join"
+        }
+    } else {
+        heights[target] = height
+        pending.push(target)
+    }
+}
+
+fn qvm1_verify_stack(code) {
+    if len(code) == 0 {
+        rtrn true
+    }
+    let heights = {0: 0}
+    let pending = [0]
+    let binary_ops = ["ADD", "SUB", "MUL", "DIV", "MOD", "EQ", "NE", "LT", "LE", "GT", "GE"]
+    whl len(pending) > 0 {
+        let pc = pending.pop()
+        if pc == len(code) {
+            cnt
+        }
+        let op = code[pc][0]
+        let required = 0
+        let delta = 0
+        if op == "CONST" || op == "LOAD_LOCAL" {
+            delta = 1
+        } else if op == "POP" || op == "STORE_LOCAL" || op == "JUMP_IF_FALSE" {
+            required = 1
+            delta = -1
+        } else if op == "DUP" {
+            required = 1
+            delta = 1
+        } else if binary_ops.contains(op) {
+            required = 2
+            delta = -1
+        } else if op == "NOT" || op == "NEG" {
+            required = 1
+        }
+        let height = heights[pc]
+        if height < required {
+            throw "stack underflow QVM1"
+        }
+        let next_height = height + delta
+        if next_height > QVM1_MAX_STACK {
+            throw "batas stack statis QVM1 terlampaui"
+        }
+        if op == "HALT" {
+            cnt
+        } else if op == "JUMP" {
+            qvm1_enqueue(heights, pending, code[pc][1], next_height)
+        } else if op == "JUMP_IF_FALSE" {
+            qvm1_enqueue(heights, pending, code[pc][1], next_height)
+            qvm1_enqueue(heights, pending, pc + 1, next_height)
+        } else {
+            qvm1_enqueue(heights, pending, pc + 1, next_height)
+        }
+    }
+    rtrn true
+}
+
+fn qvm1_validate(program) {
+    if type(program) != "map" || len(program.keys()) != 2 ||
+       !program.has("constants") || !program.has("code") {
+        throw "struktur program QVM1 tidak valid"
+    }
+    let constants = program["constants"]
+    let code = program["code"]
+    if type(constants) != "list" || len(constants) > QVM1_MAX_CONSTANTS {
+        throw "constant pool QVM1 tidak valid atau terlalu besar"
+    }
+    if type(code) != "list" || len(code) > QVM1_MAX_INSTRUCTIONS {
+        throw "instruction stream QVM1 tidak valid atau terlalu besar"
+    }
+    for value in constants {
+        let kind = type(value)
+        if !["nil", "bool", "int", "float", "str"].contains(kind) {
+            throw "tipe constant QVM1 tidak didukung"
+        }
+        qvm1_check_value(value)
+    }
+    let allowed = [
+        "CONST", "POP", "DUP", "LOAD_LOCAL", "STORE_LOCAL",
+        "ADD", "SUB", "MUL", "DIV", "MOD",
+        "EQ", "NE", "LT", "LE", "GT", "GE",
+        "NOT", "NEG", "JUMP", "JUMP_IF_FALSE", "HALT"
+    ]
+    let needs_operand = ["CONST", "LOAD_LOCAL", "STORE_LOCAL", "JUMP", "JUMP_IF_FALSE"]
+    let pc = 0
+    whl pc < len(code) {
+        let ins = code[pc]
+        if type(ins) != "list" || len(ins) < 1 || len(ins) > 2 || type(ins[0]) != "str" {
+            throw "instruksi QVM1 tidak valid"
+        }
+        let op = ins[0]
+        if !allowed.contains(op) {
+            throw "opcode QVM1 tidak dikenal"
+        }
+        if needs_operand.contains(op) {
+            if len(ins) != 2 || type(ins[1]) != "int" {
+                throw "operand opcode QVM1 tidak valid"
+            }
+        } else if len(ins) != 1 {
+            throw "opcode QVM1 tidak menerima operand"
+        }
+        if op == "CONST" && (ins[1] < 0 || ins[1] >= len(constants)) {
+            throw "indeks constant QVM1 di luar batas"
+        }
+        if (op == "LOAD_LOCAL" || op == "STORE_LOCAL") &&
+           (ins[1] < 0 || ins[1] >= QVM1_MAX_CONSTANTS) {
+            throw "slot local QVM1 di luar batas"
+        }
+        if (op == "JUMP" || op == "JUMP_IF_FALSE") &&
+           (ins[1] < 0 || ins[1] > len(code)) {
+            throw "target jump QVM1 di luar batas"
+        }
+        pc += 1
+    }
+    qvm1_verify_stack(code)
+    rtrn true
+}
+
+fn qvm1_binary(op, left, right) {
+    let left_kind = type(left)
+    let right_kind = type(right)
+    let left_num = left_kind == "int" || left_kind == "float"
+    let right_num = right_kind == "int" || right_kind == "float"
+    if op == "EQ" || op == "NE" {
+        // Match Qich q_eq: bool is never equal to an integer, while int/float
+        // numeric equality remains cross-type. Other QVM primitives compare
+        // only when their runtime types match.
+        let equal = false
+        if left_kind == "bool" || right_kind == "bool" {
+            equal = left_kind == right_kind && left == right
+        } else if left_num && right_num {
+            equal = left == right
+        } else if left_kind == right_kind {
+            equal = left == right
+        }
+        if op == "EQ" { rtrn equal }
+        rtrn !equal
+    }
+    if op == "LT" || op == "LE" || op == "GT" || op == "GE" {
+        if !(left_num && right_num) && !(left_kind == "str" && right_kind == "str") {
+            throw "operand perbandingan QVM1 tidak kompatibel"
+        }
+        if op == "LT" { rtrn left < right }
+        if op == "LE" { rtrn left <= right }
+        if op == "GT" { rtrn left > right }
+        rtrn left >= right
+    }
+    if op == "ADD" {
+        if left_num && right_num { rtrn qvm1_check_value(left + right) }
+        if left_kind == "str" && right_kind == "str" {
+            rtrn qvm1_check_value(left + right)
+        }
+        throw "ADD QVM1 membutuhkan dua angka atau dua string"
+    }
+    if op == "SUB" {
+        if left_num && right_num { rtrn qvm1_check_value(left - right) }
+        throw "SUB QVM1 membutuhkan dua angka"
+    }
+    if op == "MUL" {
+        if left_num && right_num { rtrn qvm1_check_value(left * right) }
+        if left_kind == "str" && right_kind == "int" {
+            if len(left.to_bytes()) * max(right, 0) > QVM1_MAX_STRING {
+                throw "hasil string QVM1 terlalu besar"
+            }
+            rtrn qvm1_check_value(left * right)
+        }
+        if right_kind == "str" && left_kind == "int" {
+            if len(right.to_bytes()) * max(left, 0) > QVM1_MAX_STRING {
+                throw "hasil string QVM1 terlalu besar"
+            }
+            rtrn qvm1_check_value(right * left)
+        }
+        throw "MUL QVM1 membutuhkan angka atau string dikali int"
+    }
+    if op == "DIV" || op == "MOD" {
+        if !(left_num && right_num) {
+            throw "DIV/MOD QVM1 membutuhkan dua angka"
+        }
+        if right == 0 {
+            throw "pembagian atau modulo QVM1 dengan nol"
+        }
+        if op == "DIV" { rtrn qvm1_check_value(left / right) }
+        rtrn qvm1_check_value(left % right)
+    }
+    throw "opcode binary QVM1 tidak dikenal"
+}
+
+fn qvm1_execute(program, max_steps = 1000000, max_stack = 65536) {
+    qvm1_validate(program)
+    if type(max_steps) != "int" || max_steps <= 0 {
+        throw "max_steps QVM1 harus integer positif"
+    }
+    if type(max_stack) != "int" || max_stack <= 0 {
+        throw "max_stack QVM1 harus integer positif"
+    }
+    let constants = program["constants"]
+    let code = program["code"]
+    let stack = []
+    let locals_ = {}
+    let pc = 0
+    let steps = 0
+    let binary_ops = ["ADD", "SUB", "MUL", "DIV", "MOD", "EQ", "NE", "LT", "LE", "GT", "GE"]
+    whl pc < len(code) {
+        steps += 1
+        if steps > max_steps {
+            throw "batas langkah QVM1 terlampaui"
+        }
+        let ins = code[pc]
+        let op = ins[0]
+        pc += 1
+        if op == "CONST" {
+            qvm1_push(stack, constants[ins[1]], max_stack)
+        } else if op == "POP" {
+            qvm1_pop(stack)
+        } else if op == "LOAD_LOCAL" {
+            if !locals_.has(ins[1]) {
+                throw "local QVM1 belum diinisialisasi"
+            }
+            qvm1_push(stack, locals_[ins[1]], max_stack)
+        } else if op == "STORE_LOCAL" {
+            locals_[ins[1]] = qvm1_pop(stack)
+        } else if op == "DUP" {
+            let value = qvm1_pop(stack)
+            qvm1_push(stack, value, max_stack)
+            qvm1_push(stack, value, max_stack)
+        } else if binary_ops.contains(op) {
+            let right = qvm1_pop(stack)
+            let left = qvm1_pop(stack)
+            qvm1_push(stack, qvm1_binary(op, left, right), max_stack)
+        } else if op == "NOT" {
+            let value = qvm1_pop(stack)
+            if type(value) != "bool" { throw "NOT QVM1 membutuhkan bool" }
+            qvm1_push(stack, !value, max_stack)
+        } else if op == "NEG" {
+            let value = qvm1_pop(stack)
+            if type(value) != "int" && type(value) != "float" {
+                throw "NEG QVM1 membutuhkan angka"
+            }
+            qvm1_push(stack, -value, max_stack)
+        } else if op == "JUMP" {
+            pc = ins[1]
+        } else if op == "JUMP_IF_FALSE" {
+            let condition = qvm1_pop(stack)
+            if type(condition) != "bool" { throw "kondisi QVM1 harus bool" }
+            if !condition { pc = ins[1] }
+        } else if op == "HALT" {
+            brk
+        }
+    }
+    if len(stack) > 0 {
+        rtrn stack[-1]
+    }
+    rtrn nil
+}

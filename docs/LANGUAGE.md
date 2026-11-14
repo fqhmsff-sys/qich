@@ -24,3 +24,5 @@ try { throw "x" } catch e { print(e) }
 Tipe: `int float str bool nil list map fn bytes any Result Task` + `strct`/`enm` + `T?` (nullable). Anotasi opsional; dicek saat ada.
 Operator: `+ - * / % == != < > <= >= && || ! in .. ..=`; `/` selalu float; `1..3` eksklusif, `1..=3` inklusif; slicing `xs[1..3]`.
 Aturan satu baris: `+`/`-` di awal baris memulai pernyataan baru; `(`/`[` di awal baris tidak memanggil/mengindeks.
+
+Integer method: `int.bit_length()` returns the bit length of the absolute magnitude (`0` returns `0`); it is useful for exact resource bounds.

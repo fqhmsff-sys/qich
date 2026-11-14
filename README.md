@@ -10,7 +10,7 @@ Source `.qh` · artifact `.qhc` · CLI `qh`
 
 ## Pasang
 
-Butuh Python ≥ 3.11 (Node.js opsional untuk `use js:`; g++ hanya untuk test C++).
+Butuh Python ≥ 3.11 untuk reference toolchain saat ini (Node.js opsional untuk `use js:`; g++ hanya untuk test C++). Ini kondisi transisi, bukan arsitektur akhir: compiler, runtime/VM, package tooling inti, dan minimum stdlib harus menjadi Qich-native.
 
 ```sh
 sh install.sh                        # memasang ke ~/.local/bin/qh
@@ -54,12 +54,13 @@ Template showcase: `qh new x --template ai|web|app` (lihat `examples/`).
 - [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) — pemeriksaan sebelum rilis dan batasan yang masih diketahui
 - [docs/LANGUAGE.md](docs/LANGUAGE.md) — referensi bahasa
 - [docs/DECISIONS.md](docs/DECISIONS.md) — keputusan & resolusi konflik terhadap blueprint
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/STDLIB.md](docs/STDLIB.md), [docs/BRIDGES.md](docs/BRIDGES.md)
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md), [docs/STDLIB.md](docs/STDLIB.md), [docs/BRIDGES.md](docs/BRIDGES.md)
 - [security/SECURITY.md](security/SECURITY.md) — model ancaman & mekanisme
+- [SECURITY.md](SECURITY.md) — kebijakan pelaporan kerentanan
 
 ## Menjalankan test
 
 ```sh
-python3 -m unittest discover -s tests -p "test_*.py"   # 48 test Python (keamanan, bridge, paket, CLI, fuzz)
-PYTHONPATH=src python3 -m qich test                     # 17 test .qh end-to-end
+python3 -m unittest discover -s tests -p "test_*.py"
+PYTHONPATH=src python3 -m qich test
 ```
