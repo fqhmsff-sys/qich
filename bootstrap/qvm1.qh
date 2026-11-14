@@ -7,7 +7,7 @@ let QVM1_MAX_CONSTANTS = 100000
 let QVM1_MAX_INSTRUCTIONS = 100000
 let QVM1_MAX_STRING = 1048576
 let QVM1_MAX_STACK = 65536
-let QVM1_MAX_INTEGER_DECIMAL_DIGITS = 3913
+let QVM1_MAX_INTEGER_BITS = 13000
 
 fn qvm1_check_value(value) {
     let kind = type(value)
@@ -16,9 +16,8 @@ fn qvm1_check_value(value) {
             throw "float QVM1 harus finite"
         }
     }
-    // Conservative decimal bound. Native bootstrap must replace this with the
-    // exact 13,000-bit check used by the reference verifier.
-    if kind == "int" && len(str(abs(value))) > QVM1_MAX_INTEGER_DECIMAL_DIGITS {
+    // Match the reference VM's exact arbitrary-precision integer limit.
+    if kind == "int" && value.bit_length() > QVM1_MAX_INTEGER_BITS {
         throw "integer QVM1 terlalu besar"
     }
     if kind == "str" && len(value.to_bytes()) > QVM1_MAX_STRING {
