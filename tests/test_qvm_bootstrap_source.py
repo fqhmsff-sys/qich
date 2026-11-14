@@ -3,7 +3,7 @@ import unittest
 
 from helpers import ROOT, run
 from qich.compiler.diagnostics import QichError
-from qich.qvm.vm import execute
+from qich.qvm.vm import VMError, execute
 from qich.runtime.values import to_str
 
 
@@ -103,6 +103,22 @@ class QichSourceQVMTests(unittest.TestCase):
                 reference = execute(program)
                 self.assertIs(reference, expected)
                 self.assertEqual(self.qich_execute(program), to_str(reference))
+
+    def test_qich_source_integer_limit_matches_reference_bit_limit(self):
+        largest = (1 << 13000) - 1
+        too_large = 1 << 13000
+        for value in (largest, -largest):
+            program = {"constants": [value], "code": [["CONST", 0], ["HALT"]]}
+            with self.subTest(bit_length=value.bit_length()):
+                self.assertEqual(execute(program), value)
+                self.assertEqual(self.qich_execute(program), to_str(value))
+        for value in (too_large, -too_large):
+            program = {"constants": [value], "code": [["CONST", 0], ["HALT"]]}
+            with self.subTest(bit_length=value.bit_length()):
+                with self.assertRaises(VMError):
+                    execute(program)
+                with self.assertRaises(QichError):
+                    self.qich_execute(program)
 
     def test_qich_source_verifier_rejects_static_stack_underflow(self):
         with self.assertRaises(QichError):
