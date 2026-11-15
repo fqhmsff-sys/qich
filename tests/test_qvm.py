@@ -114,6 +114,11 @@ class QVMPreparedProgramTests(unittest.TestCase):
         with self.assertRaises(VMError):
             prepare({"constants": (), "code": [["HALT"]]})
 
+    def test_forged_prepared_token_cannot_skip_validation(self):
+        forged = qvm_vm._PreparedProgram()
+        with self.assertRaises(VMError):
+            execute(forged)
+
     def test_one_shot_execution_uses_the_validated_snapshot(self):
         source = {
             "constants": [7],
