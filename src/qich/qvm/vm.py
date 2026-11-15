@@ -1,5 +1,5 @@
 """Bounded, capability-free reference executor for QVM v1."""
-from weakref import WeakKeyDictionary
+from dataclasses import dataclass, field
 import math
 
 from .bytecode import (
@@ -9,21 +9,24 @@ from ..runtime.values import q_eq
 
 DEFAULT_MAX_STEPS = 1_000_000
 DEFAULT_MAX_STACK = MAX_STACK
+_PREPARED_TOKEN = object()
 
 
 class VMError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True, slots=True)
 class _PreparedProgram:
-    """Opaque token for a validated snapshot created only by prepare()."""
+    """Immutable snapshot token created by prepare()."""
 
-    __slots__ = ("__weakref__",)
+    constants: tuple
+    code: tuple
+    _token: object = field(repr=False, compare=False)
 
-
-# Keep the immutable data outside the token. Merely constructing the private
-# token class must not let callers skip validation in execute().
-_PREPARED_PROGRAMS = WeakKeyDictionary()
+    def __post_init__(self):
+        if self._token is not _PREPARED_TOKEN:
+            raise TypeError("prepared program QVM harus dibuat oleh prepare()")
 
 
 def prepare(program):
@@ -31,7 +34,6 @@ def prepare(program):
 
     Validation is performed against the copied snapshot. Later mutations to
     caller-owned dictionaries/lists therefore cannot alter prepared code.
-    The returned token carries no writable program data.
     """
     if type(program) is not dict or set(program) != {"constants", "code"}:
         raise VMError("bytecode QVM tidak valid")
@@ -47,12 +49,11 @@ def prepare(program):
         _validate(snapshot)
     except BytecodeError as exc:
         raise VMError("bytecode QVM tidak valid") from exc
-    prepared = _PreparedProgram()
-    _PREPARED_PROGRAMS[prepared] = (
+    return _PreparedProgram(
         tuple(snapshot["constants"]),
         tuple(tuple(ins) for ins in snapshot["code"]),
+        _PREPARED_TOKEN,
     )
-    return prepared
 
 
 def _number(value):
@@ -129,15 +130,16 @@ def execute(program, *, max_steps=DEFAULT_MAX_STEPS, max_stack=DEFAULT_MAX_STACK
     Positive step and stack budgets are mandatory.
     """
     if type(program) is _PreparedProgram:
-        try:
-            constants, code = _PREPARED_PROGRAMS[program]
-        except KeyError as exc:
-            raise VMError("prepared program QVM tidak valid") from exc
+        if getattr(program, "_token", None) is not _PREPARED_TOKEN:
+            raise VMError("prepared program QVM tidak valid")
+        constants = program.constants
+        code = program.code
     else:
         # Snapshot before validation so caller mutation cannot change the
         # bytecode state that is executed after verification.
         prepared = prepare(program)
-        constants, code = _PREPARED_PROGRAMS[prepared]
+        constants = prepared.constants
+        code = prepared.code
     if type(max_steps) is not int or isinstance(max_steps, bool) or max_steps <= 0:
         raise VMError("max_steps QVM harus integer positif")
     if type(max_stack) is not int or isinstance(max_stack, bool) or max_stack <= 0:
