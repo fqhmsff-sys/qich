@@ -1,5 +1,5 @@
 """Bounded, capability-free reference executor for QVM v1."""
-from dataclasses import dataclass
+from weakref import WeakKeyDictionary
 import math
 
 from .bytecode import (
@@ -15,12 +15,15 @@ class VMError(RuntimeError):
     pass
 
 
-@dataclass(frozen=True, slots=True)
 class _PreparedProgram:
-    """Immutable, validated snapshot for repeated execution."""
+    """Opaque token for a validated snapshot created only by prepare()."""
 
-    constants: tuple
-    code: tuple
+    __slots__ = ("__weakref__",)
+
+
+# Keep the immutable data outside the token. Merely constructing the private
+# token class must not let callers skip validation in execute().
+_PREPARED_PROGRAMS = WeakKeyDictionary()
 
 
 def prepare(program):
@@ -28,6 +31,7 @@ def prepare(program):
 
     Validation is performed against the copied snapshot. Later mutations to
     caller-owned dictionaries/lists therefore cannot alter prepared code.
+    The returned token carries no writable program data.
     """
     if type(program) is not dict or set(program) != {"constants", "code"}:
         raise VMError("bytecode QVM tidak valid")
@@ -43,10 +47,12 @@ def prepare(program):
         _validate(snapshot)
     except BytecodeError as exc:
         raise VMError("bytecode QVM tidak valid") from exc
-    return _PreparedProgram(
+    prepared = _PreparedProgram()
+    _PREPARED_PROGRAMS[prepared] = (
         tuple(snapshot["constants"]),
         tuple(tuple(ins) for ins in snapshot["code"]),
     )
+    return prepared
 
 
 def _number(value):
@@ -123,14 +129,15 @@ def execute(program, *, max_steps=DEFAULT_MAX_STEPS, max_stack=DEFAULT_MAX_STACK
     Positive step and stack budgets are mandatory.
     """
     if type(program) is _PreparedProgram:
-        constants = program.constants
-        code = program.code
+        try:
+            constants, code = _PREPARED_PROGRAMS[program]
+        except KeyError as exc:
+            raise VMError("prepared program QVM tidak valid") from exc
     else:
         # Snapshot before validation so caller mutation cannot change the
         # bytecode state that is executed after verification.
         prepared = prepare(program)
-        constants = prepared.constants
-        code = prepared.code
+        constants, code = _PREPARED_PROGRAMS[prepared]
     if type(max_steps) is not int or isinstance(max_steps, bool) or max_steps <= 0:
         raise VMError("max_steps QVM harus integer positif")
     if type(max_stack) is not int or isinstance(max_stack, bool) or max_stack <= 0:
