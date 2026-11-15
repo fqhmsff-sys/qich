@@ -22,11 +22,7 @@ class _PreparedProgram:
 
     constants: tuple
     code: tuple
-    _token: object = field(repr=False, compare=False)
-
-    def __post_init__(self):
-        if self._token is not _PREPARED_TOKEN:
-            raise TypeError("prepared program QVM harus dibuat oleh prepare()")
+    _token: object = field(default=None, init=False, repr=False, compare=False)
 
 
 def prepare(program):
@@ -49,11 +45,12 @@ def prepare(program):
         _validate(snapshot)
     except BytecodeError as exc:
         raise VMError("bytecode QVM tidak valid") from exc
-    return _PreparedProgram(
+    prepared = _PreparedProgram(
         tuple(snapshot["constants"]),
         tuple(tuple(ins) for ins in snapshot["code"]),
-        _PREPARED_TOKEN,
     )
+    object.__setattr__(prepared, "_token", _PREPARED_TOKEN)
+    return prepared
 
 
 def _number(value):
