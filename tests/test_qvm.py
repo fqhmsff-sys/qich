@@ -115,7 +115,9 @@ class QVMPreparedProgramTests(unittest.TestCase):
             prepare({"constants": (), "code": [["HALT"]]})
 
     def test_forged_prepared_token_cannot_skip_validation(self):
-        forged = qvm_vm._PreparedProgram()
+        with self.assertRaises(TypeError):
+            qvm_vm._PreparedProgram((), (), object())
+        forged = object.__new__(qvm_vm._PreparedProgram)
         with self.assertRaises(VMError):
             execute(forged)
 
