@@ -1,5 +1,4 @@
 """Regression tests for the versioned QVM bytecode envelope and executor."""
-from dataclasses import replace
 import hashlib
 import random
 import unittest
@@ -115,17 +114,27 @@ class QVMPreparedProgramTests(unittest.TestCase):
         with self.assertRaises(VMError):
             prepare({"constants": (), "code": [["HALT"]]})
 
-    def test_forged_prepared_token_cannot_skip_validation(self):
-        prepared = prepare({"constants": [], "code": [["HALT"]]})
-        forged = replace(prepared, code=(("EVAL_PYTHON",),))
+    def test_unregistered_prepared_handles_cannot_skip_validation(self):
+        forged = qvm_vm._PreparedProgram()
         with self.assertRaises(VMError):
             execute(forged)
-        direct = qvm_vm._PreparedProgram((), (("EVAL_PYTHON",),))
+        direct = qvm_vm._PreparedProgram()
         with self.assertRaises(VMError):
             execute(direct)
         uninitialized = object.__new__(qvm_vm._PreparedProgram)
         with self.assertRaises(VMError):
             execute(uninitialized)
+
+    def test_prepared_handle_cannot_mutate_validated_snapshot(self):
+        prepared = prepare({
+            "constants": [7],
+            "code": [["CONST", 0], ["HALT"]],
+        })
+        with self.assertRaises(AttributeError):
+            object.__setattr__(prepared, "constants", (object(),))
+        with self.assertRaises(AttributeError):
+            object.__setattr__(prepared, "code", (("HALT",),))
+        self.assertEqual(execute(prepared), 7)
 
     def test_one_shot_execution_uses_the_validated_snapshot(self):
         source = {
