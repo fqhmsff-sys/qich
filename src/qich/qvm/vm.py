@@ -1,6 +1,7 @@
 """Bounded, capability-free reference executor for QVM v1."""
-from dataclasses import dataclass, field
 import math
+import weakref
+from threading import RLock
 
 from .bytecode import (
     BytecodeError, MAX_INTEGER_BITS, MAX_STACK, MAX_STRING, _validate,
@@ -9,20 +10,18 @@ from ..runtime.values import q_eq
 
 DEFAULT_MAX_STEPS = 1_000_000
 DEFAULT_MAX_STACK = MAX_STACK
-_PREPARED_TOKEN = object()
+_PREPARED_PROGRAMS = weakref.WeakKeyDictionary()
+_PREPARED_LOCK = RLock()
 
 
 class VMError(RuntimeError):
     pass
 
 
-@dataclass(frozen=True, slots=True)
 class _PreparedProgram:
-    """Immutable snapshot token created by prepare()."""
+    """Opaque handle; its immutable snapshot is held outside the object."""
 
-    constants: tuple
-    code: tuple
-    _token: object = field(default=None, init=False, repr=False, compare=False)
+    __slots__ = ("__weakref__",)
 
 
 def prepare(program):
@@ -45,12 +44,22 @@ def prepare(program):
         _validate(snapshot)
     except BytecodeError as exc:
         raise VMError("bytecode QVM tidak valid") from exc
-    prepared = _PreparedProgram(
+    prepared = _PreparedProgram()
+    frozen_snapshot = (
         tuple(snapshot["constants"]),
         tuple(tuple(ins) for ins in snapshot["code"]),
     )
-    object.__setattr__(prepared, "_token", _PREPARED_TOKEN)
+    with _PREPARED_LOCK:
+        _PREPARED_PROGRAMS[prepared] = frozen_snapshot
     return prepared
+
+
+def _prepared_snapshot(program):
+    with _PREPARED_LOCK:
+        snapshot = _PREPARED_PROGRAMS.get(program)
+    if snapshot is None:
+        raise VMError("prepared program QVM tidak valid")
+    return snapshot
 
 
 def _number(value):
@@ -127,16 +136,12 @@ def execute(program, *, max_steps=DEFAULT_MAX_STEPS, max_stack=DEFAULT_MAX_STACK
     Positive step and stack budgets are mandatory.
     """
     if type(program) is _PreparedProgram:
-        if getattr(program, "_token", None) is not _PREPARED_TOKEN:
-            raise VMError("prepared program QVM tidak valid")
-        constants = program.constants
-        code = program.code
+        constants, code = _prepared_snapshot(program)
     else:
         # Snapshot before validation so caller mutation cannot change the
         # bytecode state that is executed after verification.
         prepared = prepare(program)
-        constants = prepared.constants
-        code = prepared.code
+        constants, code = _prepared_snapshot(prepared)
     if type(max_steps) is not int or isinstance(max_steps, bool) or max_steps <= 0:
         raise VMError("max_steps QVM harus integer positif")
     if type(max_stack) is not int or isinstance(max_stack, bool) or max_stack <= 0:
