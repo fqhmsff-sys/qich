@@ -10,6 +10,8 @@ Perubahan penting untuk pengguna Qich dicatat di sini.
 
 ## Unreleased
 
+- Simpan snapshot prepared QVM1 di registry internal terpisah dari handle opaque agar bypass pembekuan objek melalui `object.__setattr__` tidak mengubah bytecode yang dieksekusi; tambahkan regression test.
+
 - Tambahkan `bootstrap/qvm1.qh`: prototype verifier dan executor QVM1 yang ditulis dalam Qich, dengan differential tests terhadap reference VM. Source ini masih dijalankan melalui Python reference runtime dan belum menjadi native bootstrap.
 - Integrasikan QVM1 versioned bytecode, verifier, reference executor, subset compiler, prepared execution, differential corpus, dan benchmark ke branch Qich v2. QVM tetap EXPERIMENTAL dan masih berjalan di Python; belum ada klaim native/self-hosted.
 - Perketat publikasi paket dengan membuka file sumber melalui descriptor no-follow, mencocokkan identitas file dengan fstat, dan membatasi jumlah byte aktual yang di-stream ke ZIP agar pergantian symlink atau pertumbuhan file setelah stat tidak melewati batas.
