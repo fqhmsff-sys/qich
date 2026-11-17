@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [test_language.py, test_bridge.py, test_packages.py, test_security.py, test_security_regressions.py, test_qvm.py, test_qvm_differential.py, test_qvm_bootstrap_source.py, test_chyb_cli.py]
+        suite: [test_language.py, test_bridge.py, test_packages.py, test_security.py, test_security_regressions.py, test_qvm.py, test_qvm_differential.py, test_qvm_bootstrap_source.py, test_qvm_native_seed.py, test_chyb_cli.py]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -25,6 +25,11 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: '3.11'
+      - name: Install native bootstrap seed build dependencies
+        if: matrix.suite == 'test_qvm_native_seed.py'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev libjson-c-dev
       - name: Run ${{ matrix.suite }}
         env:
           PYTHONPATH: src

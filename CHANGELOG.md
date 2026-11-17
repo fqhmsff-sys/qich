@@ -10,6 +10,9 @@ Perubahan penting untuk pengguna Qich dicatat di sini.
 
 ## Unreleased
 
+- Tambahkan seed bootstrap native C untuk subset QVM1: validasi envelope/checksum, JSON canonical, verifier stack/control-flow, batas resource, penolakan symlink input, dan eksekusi integer/bool/nil. Seed hanya alat build-time, bergantung pada OpenSSL/json-c, dan belum full-conformance.
+- Snapshot source QVM1 dalam Qich kini menyalin constant pool serta instruction stream bersarang sebelum validasi/eksekusi; tambahkan regression test untuk mutasi list caller setelah snapshot.
+
 - Simpan snapshot prepared QVM1 di registry internal terpisah dari handle opaque agar bypass pembekuan objek melalui `object.__setattr__` tidak mengubah bytecode yang dieksekusi; tambahkan regression test.
 
 - Tambahkan `bootstrap/qvm1.qh`: prototype verifier dan executor QVM1 yang ditulis dalam Qich, dengan differential tests terhadap reference VM. Source ini masih dijalankan melalui Python reference runtime dan belum menjadi native bootstrap.

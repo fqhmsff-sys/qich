@@ -232,16 +232,60 @@ fn qvm1_binary(op, left, right) {
     throw "opcode binary QVM1 tidak dikenal"
 }
 
+// Copy mutable bytecode containers before validation and execution.
+// Constants and operands are later restricted to immutable primitive values.
+fn qvm1_snapshot(program) {
+    if type(program) != "map" || len(program.keys()) != 2 ||
+       !program.has("constants") || !program.has("code") {
+        throw "struktur program QVM1 tidak valid"
+    }
+    let source_constants = program["constants"]
+    let source_code = program["code"]
+    if type(source_constants) != "list" || type(source_code) != "list" ||
+       len(source_constants) > QVM1_MAX_CONSTANTS ||
+       len(source_code) > QVM1_MAX_INSTRUCTIONS {
+        throw "struktur program QVM1 tidak valid atau terlalu besar"
+    }
+    let constants = []
+    let i = 0
+    let constant_count = len(source_constants)
+    whl i < constant_count {
+        constants.push(source_constants[i])
+        i += 1
+    }
+    let code = []
+    let pc = 0
+    let instruction_count = len(source_code)
+    whl pc < instruction_count {
+        let source_instruction = source_code[pc]
+        if type(source_instruction) != "list" ||
+           len(source_instruction) < 1 || len(source_instruction) > 2 {
+            throw "instruksi QVM1 tidak valid"
+        }
+        let copied_instruction = []
+        let j = 0
+        let operand_count = len(source_instruction)
+        whl j < operand_count {
+            copied_instruction.push(source_instruction[j])
+            j += 1
+        }
+        code.push(copied_instruction)
+        pc += 1
+    }
+    rtrn {"constants": constants, "code": code}
+}
+
 fn qvm1_execute(program, max_steps = 1000000, max_stack = 65536) {
-    qvm1_validate(program)
+    let snapshot = qvm1_snapshot(program)
+    qvm1_validate(snapshot)
     if type(max_steps) != "int" || max_steps <= 0 {
         throw "max_steps QVM1 harus integer positif"
     }
     if type(max_stack) != "int" || max_stack <= 0 {
         throw "max_stack QVM1 harus integer positif"
     }
-    let constants = program["constants"]
-    let code = program["code"]
+    let constants = snapshot["constants"]
+    let code = snapshot["code"]
     let stack = []
     let locals_ = {}
     let pc = 0

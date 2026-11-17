@@ -120,6 +120,22 @@ class QichSourceQVMTests(unittest.TestCase):
                 with self.assertRaises(QichError):
                     self.qich_execute(program)
 
+    def test_qich_source_snapshot_detaches_nested_mutable_bytecode(self):
+        program = {
+            "constants": [7],
+            "code": [["CONST", 0], ["HALT"]],
+        }
+        source = (
+            self.bootstrap_source
+            + "\nlet _program = " + qich_literal(program)
+            + "\nlet _snapshot = qvm1_snapshot(_program)"
+            + "\n_program[\"constants\"].push(99)"
+            + "\n_program[\"code\"][0].push(99)"
+            + "\n_program[\"code\"].push([\"EVAL_PYTHON\"])"
+            + "\nprint(qvm1_execute(_snapshot))\n"
+        )
+        self.assertEqual(run(source).rstrip("\n"), "7")
+
     def test_qich_source_verifier_rejects_static_stack_underflow(self):
         with self.assertRaises(QichError):
             self.qich_execute({"constants": [], "code": [["POP"], ["HALT"]]})

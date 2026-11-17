@@ -14,6 +14,7 @@ Legenda: **TESTED** = ada test otomatis yang lulus di lingkungan pengembangan (L
 | Compiler → `.qhc` (AST ter-serialisasi + SHA-256, diverifikasi saat load) | TESTED | **bukan** bytecode VM atau native; lihat DECISIONS |
 | QVM1 bytecode versioned + reference stack executor | EXPERIMENTAL | compiler subset AST → QVM1 dan executor referensi masih Python; lihat BOOTSTRAP.md |
 | QVM1 verifier/executor source prototype dalam Qich | EXPERIMENTAL | `bootstrap/qvm1.qh` diuji melalui reference runtime; belum native executable atau bootstrap mandiri |
+| Native bootstrap seed QVM1 | EXPERIMENTAL | `bootstrap/native/qvm1_seed.c`; subset nil/bool/int64, build-time C + OpenSSL + json-c; bukan full-conformance atau runtime final |
 | Native compiler/runtime, self-hosted compiler, GC sendiri | PLANNED | toolchain mandiri belum tersedia; memori reference runtime masih dikelola Python |
 | Compiler/runtime Qich-native dan self-hosted | PLANNED | source akhir wajib Qich; bootstrap seed C/Rust hanya build-time sementara, bukan runtime host permanen |
 | Formatter (indentasi + spasi, idempoten, menjaga komentar), `qh doc` | TESTED | formatter berbasis baris, bukan pretty-printer AST |
@@ -49,4 +50,4 @@ Lihat `security/SECURITY.md` — tiap klaim ada test. Belum ada: signed releases
 
 ## Kemandirian
 
-Qich **belum mandiri**. QVM1, compiler subset, verifier, dan executor masih reference implementation Python berstatus EXPERIMENTAL. Compiler utama, runtime/VM, package tooling, dan minimum stdlib masih membutuhkan Python sebagai host. Tenggat final kemandirian adalah **14 Desember 2026**; gerbang penerimaan dan tahapan bootstrap ada di [BOOTSTRAP.md](BOOTSTRAP.md). Tidak ada klaim self-hosting sebelum clean-room build tanpa Python/Node dan stage0 → stage1 → stage2 lulus.
+Qich **belum mandiri**. QVM1 reference compiler/verifier/executor masih Python berstatus EXPERIMENTAL; seed C native baru menjalankan subset int64/bool/nil dan belum full-conformance. Compiler utama, runtime/VM, package tooling, dan minimum stdlib masih membutuhkan Python sebagai host. Tenggat final kemandirian adalah **14 Desember 2026**; gerbang penerimaan dan tahapan bootstrap ada di [BOOTSTRAP.md](BOOTSTRAP.md). Tidak ada klaim self-hosting sebelum clean-room build tanpa Python/Node dan stage0 → stage1 → stage2 lulus.
