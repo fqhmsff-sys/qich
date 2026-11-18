@@ -1,4 +1,4 @@
-"""Smoke and rejection tests for the temporary native QVM1 bootstrap seed."""
+"""Smoke, rejection, and differential tests for the temporary native QVM1 seed."""
 import hashlib
 import os
 import shutil
@@ -8,12 +8,21 @@ import unittest
 from pathlib import Path
 
 from qich.qvm.bytecode import encode
+from qich.qvm.vm import execute as execute_reference
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def envelope(body):
     return b"QVM1\n" + hashlib.sha256(body).hexdigest().encode("ascii") + b"\n" + body
+
+
+def render_value(value):
+    if value is None:
+        return "nil"
+    if type(value) is bool:
+        return "true" if value else "false"
+    return str(value)
 
 
 class NativeQVMSeedTests(unittest.TestCase):
@@ -64,6 +73,51 @@ class NativeQVMSeedTests(unittest.TestCase):
         ]
         for program, expected in cases:
             with self.subTest(program=program):
+                result = self.run_program(program)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, expected + "\n")
+
+    def test_native_supported_subset_matches_reference_executor(self):
+        cases = [
+            ("CONST", {"constants": [7], "code": [["CONST", 0], ["HALT"]]}),
+            ("POP", {"constants": [7], "code": [["CONST", 0], ["POP"], ["HALT"]]}),
+            ("DUP", {"constants": [7], "code": [["CONST", 0], ["DUP"], ["POP"], ["HALT"]]}),
+            ("LOAD_LOCAL/STORE_LOCAL", {
+                "constants": [17],
+                "code": [["CONST", 0], ["STORE_LOCAL", 12], ["LOAD_LOCAL", 12], ["HALT"]],
+            }),
+            ("ADD", {"constants": [-7, 5], "code": [["CONST", 0], ["CONST", 1], ["ADD"], ["HALT"]]}),
+            ("SUB", {"constants": [-7, 5], "code": [["CONST", 0], ["CONST", 1], ["SUB"], ["HALT"]]}),
+            ("MUL", {"constants": [-7, 5], "code": [["CONST", 0], ["CONST", 1], ["MUL"], ["HALT"]]}),
+            ("MOD-positive-divisor", {"constants": [-5, 3], "code": [["CONST", 0], ["CONST", 1], ["MOD"], ["HALT"]]}),
+            ("MOD-negative-divisor", {"constants": [5, -3], "code": [["CONST", 0], ["CONST", 1], ["MOD"], ["HALT"]]}),
+            ("MOD-minimum-overflow-edge", {
+                "constants": [-(2**63), -1],
+                "code": [["CONST", 0], ["CONST", 1], ["MOD"], ["HALT"]],
+            }),
+            ("EQ-strict-bool-int", {"constants": [True, 1], "code": [["CONST", 0], ["CONST", 1], ["EQ"], ["HALT"]]}),
+            ("NE", {"constants": [None, False], "code": [["CONST", 0], ["CONST", 1], ["NE"], ["HALT"]]}),
+            ("LT", {"constants": [2, 3], "code": [["CONST", 0], ["CONST", 1], ["LT"], ["HALT"]]}),
+            ("LE", {"constants": [3, 3], "code": [["CONST", 0], ["CONST", 1], ["LE"], ["HALT"]]}),
+            ("GT", {"constants": [4, 3], "code": [["CONST", 0], ["CONST", 1], ["GT"], ["HALT"]]}),
+            ("GE", {"constants": [3, 3], "code": [["CONST", 0], ["CONST", 1], ["GE"], ["HALT"]]}),
+            ("NOT", {"constants": [False], "code": [["CONST", 0], ["NOT"], ["HALT"]]}),
+            ("NEG", {"constants": [7], "code": [["CONST", 0], ["NEG"], ["HALT"]]}),
+            ("JUMP", {"constants": [1, 9], "code": [["JUMP", 2], ["CONST", 0], ["CONST", 1], ["HALT"]]}),
+            ("JUMP_IF_FALSE-true", {
+                "constants": [True, 7, 9],
+                "code": [["CONST", 0], ["JUMP_IF_FALSE", 4], ["CONST", 1], ["JUMP", 5], ["CONST", 2], ["HALT"]],
+            }),
+            ("JUMP_IF_FALSE-false", {
+                "constants": [False, 7, 9],
+                "code": [["CONST", 0], ["JUMP_IF_FALSE", 4], ["CONST", 1], ["JUMP", 5], ["CONST", 2], ["HALT"]],
+            }),
+            ("HALT", {"constants": [11, 99], "code": [["CONST", 0], ["HALT"], ["CONST", 1]]}),
+            ("empty-program", {"constants": [], "code": []}),
+        ]
+        for opcode, program in cases:
+            with self.subTest(opcode=opcode):
+                expected = render_value(execute_reference(program))
                 result = self.run_program(program)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout, expected + "\n")
