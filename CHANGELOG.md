@@ -10,6 +10,8 @@ Perubahan penting untuk pengguna Qich dicatat di sini.
 
 ## Unreleased
 
+- Buka input native QVM1 seed secara non-blocking agar named pipe/FIFO ditolak segera sebelum pemeriksaan regular-file; tambahkan regression test dengan batas waktu.
+
 - Tambahkan seed bootstrap native C untuk subset QVM1: validasi envelope/checksum, JSON canonical, verifier stack/control-flow, batas resource, penolakan symlink input, dan eksekusi integer/bool/nil. Seed hanya alat build-time, bergantung pada OpenSSL/json-c, dan belum full-conformance.
 - Snapshot source QVM1 dalam Qich kini menyalin constant pool serta instruction stream bersarang sebelum validasi/eksekusi; tambahkan regression test untuk mutasi list caller setelah snapshot.
 

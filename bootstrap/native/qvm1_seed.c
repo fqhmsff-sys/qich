@@ -264,7 +264,7 @@ static bool execute(const Program *p, Value *result) {
 }
 
 static bool read_file(const char *path, unsigned char **out, size_t *length) {
-    int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
     if (fd < 0) return false;
     struct stat before, after;
     if (fstat(fd, &before) != 0 || !S_ISREG(before.st_mode) || before.st_size < 70 ||

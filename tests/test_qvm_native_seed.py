@@ -195,5 +195,25 @@ class NativeQVMSeedTests(unittest.TestCase):
             target.unlink(missing_ok=True)
 
 
+    @unittest.skipUnless(
+        os.name == "posix" and hasattr(os, "mkfifo") and hasattr(os, "O_NONBLOCK"),
+        "non-blocking FIFO open is POSIX-specific",
+    )
+    def test_fifo_input_is_rejected_without_blocking(self):
+        fifo = Path(self.temp.name) / "input.fifo"
+        os.mkfifo(fifo)
+        try:
+            result = subprocess.run(
+                [str(self.binary), str(fifo)],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("file tidak valid", result.stderr)
+        finally:
+            fifo.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     unittest.main()
