@@ -292,9 +292,6 @@ static bool parse_program(const unsigned char *body, size_t body_len, Program *p
     bool normalized = canonical && canonical_json_utf8(canonical, &canonical_utf8, &canonical_length);
     bool canonical_match = normalized && canonical_length == body_len &&
                            memcmp(canonical_utf8, body, body_len) == 0;
-    if (!canonical_match) {
-        fprintf(stderr, "qvm1-seed: canonical mismatch normalized=%d canonical=%zu body=%zu\\n", normalized ? 1 : 0, canonical_length, body_len);
-    }
     free(canonical_utf8);
     if (!canonical_match || json_object_get_type(root) != json_type_object || json_object_object_length(root) != 2) {
         json_object_put(root); return false;
@@ -304,7 +301,7 @@ static bool parse_program(const unsigned char *body, size_t body_len, Program *p
                   json_object_object_get_ex(root, "constants", &constants) &&
                   code && constants && json_object_get_type(code) == json_type_array &&
                   json_object_get_type(constants) == json_type_array;
-    if (!fields) { fprintf(stderr, "qvm1-seed: root fields invalid\\n"); json_object_put(root); return false; }
+    if (!fields) { json_object_put(root); return false; }
     size_t code_count = json_object_array_length(code);
     size_t constant_count = json_object_array_length(constants);
     if (code_count > MAX_ITEMS || constant_count > MAX_ITEMS) { json_object_put(root); return false; }
@@ -316,10 +313,8 @@ static bool parse_program(const unsigned char *body, size_t body_len, Program *p
     program->constant_count = constant_count;
 
     bool ok = true;
-    for (size_t i = 0; i < constant_count && ok; i++) {
+    for (size_t i = 0; i < constant_count && ok; i++)
         ok = get_value(json_object_array_get_idx(constants, i), &program->constants[i]);
-        if (!ok) fprintf(stderr, "qvm1-seed: constant %zu rejected\\n", i);
-    }
     for (size_t i = 0; i < code_count && ok; i++) {
         struct json_object *row = json_object_array_get_idx(code, i);
         if (!row || json_object_get_type(row) != json_type_array) { ok = false; break; }
