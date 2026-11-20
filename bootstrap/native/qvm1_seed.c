@@ -15,12 +15,20 @@
 
 #define MAX_BYTECODE (16u * 1024u * 1024u)
 #define MAX_ITEMS 100000u
+#define MAX_STRING (1024u * 1024u)
 #define MAX_STACK 65536u
 #define DEFAULT_MAX_STEPS 1000000u
 #define FILE_LIMIT (MAX_BYTECODE + 70u)
 
-typedef enum { V_NIL, V_BOOL, V_INT } ValueKind;
-typedef struct { ValueKind kind; union { bool boolean; int64_t integer; } as; } Value;
+typedef enum { V_NIL, V_BOOL, V_INT, V_STRING } ValueKind;
+typedef struct {
+    ValueKind kind;
+    union {
+        bool boolean;
+        int64_t integer;
+        struct { char *data; size_t length; } string;
+    } as;
+} Value;
 typedef enum {
     OP_CONST, OP_POP, OP_DUP, OP_LOAD_LOCAL, OP_STORE_LOCAL,
     OP_ADD, OP_SUB, OP_MUL, OP_MOD, OP_EQ, OP_NE, OP_LT, OP_LE,
@@ -29,6 +37,18 @@ typedef enum {
 } Op;
 typedef struct { Op op; int64_t operand; bool has_operand; } Instruction;
 typedef struct { Value *constants; size_t constant_count; Instruction *code; size_t code_count; } Program;
+
+static void free_program(Program *program) {
+    if (!program) return;
+    if (program->constants) {
+        for (size_t i = 0; i < program->constant_count; i++)
+            if (program->constants[i].kind == V_STRING)
+                free(program->constants[i].as.string.data);
+    }
+    free(program->constants);
+    free(program->code);
+    memset(program, 0, sizeof(*program));
+}
 
 static int fail(const char *message) {
     fprintf(stderr, "qvm1-seed: %s\n", message);
@@ -52,6 +72,19 @@ static bool get_value(struct json_object *item, Value *out) {
     enum json_type type = json_object_get_type(item);
     if (type == json_type_boolean) { out->kind = V_BOOL; out->as.boolean = json_object_get_boolean(item) != 0; return true; }
     if (type == json_type_int) { out->kind = V_INT; return get_i64(item, &out->as.integer); }
+    if (type == json_type_string) {
+        int length = json_object_get_string_len(item);
+        const char *text = json_object_get_string(item);
+        if (length < 0 || !text || (size_t)length > MAX_STRING) return false;
+        char *copy = malloc((size_t)length + 1);
+        if (!copy) return false;
+        memcpy(copy, text, (size_t)length);
+        copy[(size_t)length] = '\0';
+        out->kind = V_STRING;
+        out->as.string.data = copy;
+        out->as.string.length = (size_t)length;
+        return true;
+    }
     return false;
 }
 
@@ -241,7 +274,20 @@ static bool execute(const Program *p, Value *result) {
                     bool equal = a.kind == b.kind;
                     if (equal && a.kind == V_BOOL) equal = a.as.boolean == b.as.boolean;
                     else if (equal && a.kind == V_INT) equal = a.as.integer == b.as.integer;
+                    else if (equal && a.kind == V_STRING)
+                        equal = a.as.string.length == b.as.string.length &&
+                                memcmp(a.as.string.data, b.as.string.data, a.as.string.length) == 0;
                     ok = push(stack, &depth, bool_value(ins.op == OP_EQ ? equal : !equal));
+                } else if (a.kind == V_STRING && b.kind == V_STRING &&
+                           (ins.op == OP_LT || ins.op == OP_LE || ins.op == OP_GT || ins.op == OP_GE)) {
+                    size_t common = a.as.string.length < b.as.string.length ? a.as.string.length : b.as.string.length;
+                    int cmp = common ? memcmp(a.as.string.data, b.as.string.data, common) : 0;
+                    if (!cmp && a.as.string.length != b.as.string.length)
+                        cmp = a.as.string.length < b.as.string.length ? -1 : 1;
+                    bool comparison = ins.op == OP_LT ? cmp < 0 :
+                                      ins.op == OP_LE ? cmp <= 0 :
+                                      ins.op == OP_GT ? cmp > 0 : cmp >= 0;
+                    ok = push(stack, &depth, bool_value(comparison));
                 } else if (a.kind != V_INT || b.kind != V_INT) ok = false;
                 else if (ins.op == OP_ADD) ok = add_i64(a.as.integer, b.as.integer, &n) && push(stack, &depth, int_value(n));
                 else if (ins.op == OP_SUB) ok = sub_i64(a.as.integer, b.as.integer, &n) && push(stack, &depth, int_value(n));
@@ -313,14 +359,19 @@ int main(int argc, char **argv) {
     bool parsed = parse_program(body, body_len, &program);
     free(data);
     if (!parsed || !validate(&program)) {
-        free(program.constants); free(program.code);
+        free_program(&program);
         return fail("payload tidak valid atau di luar subset bootstrap seed");
     }
     Value result; bool ok = execute(&program, &result);
-    free(program.constants); free(program.code);
-    if (!ok) return fail("eksekusi ditolak, gagal, atau melewati batas langkah");
+    if (!ok) { free_program(&program); return fail("eksekusi ditolak, gagal, atau melewati batas langkah"); }
     if (result.kind == V_NIL) puts("nil");
     else if (result.kind == V_BOOL) puts(result.as.boolean ? "true" : "false");
-    else printf("%" PRId64 "\n", result.as.integer);
+    else if (result.kind == V_STRING) {
+        if (fwrite(result.as.string.data, 1, result.as.string.length, stdout) != result.as.string.length || putchar('\n') == EOF) {
+            free_program(&program);
+            return fail("gagal menulis hasil string");
+        }
+    } else printf("%" PRId64 "\n", result.as.integer);
+    free_program(&program);
     return 0;
 }

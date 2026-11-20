@@ -14,7 +14,7 @@ Legenda: **TESTED** = ada test otomatis yang lulus di lingkungan pengembangan (L
 | Compiler → `.qhc` (AST ter-serialisasi + SHA-256, diverifikasi saat load) | TESTED | **bukan** bytecode VM atau native; lihat DECISIONS |
 | QVM1 bytecode versioned + reference stack executor | EXPERIMENTAL | compiler subset AST → QVM1 dan executor referensi masih Python; lihat BOOTSTRAP.md |
 | QVM1 verifier/executor source prototype dalam Qich | EXPERIMENTAL | `bootstrap/qvm1.qh` diuji melalui reference runtime; belum native executable atau bootstrap mandiri |
-| Native bootstrap seed QVM1 | EXPERIMENTAL | `bootstrap/native/qvm1_seed.c`; subset nil/bool/int64, build-time C + OpenSSL + json-c; bukan full-conformance atau runtime final |
+| Native bootstrap seed QVM1 | EXPERIMENTAL | `bootstrap/native/qvm1_seed.c`; subset nil/bool/int64/string constant dan perbandingan string, build-time C + OpenSSL + json-c; bukan full-conformance atau runtime final |
 | Native compiler/runtime, self-hosted compiler, GC sendiri | PLANNED | toolchain mandiri belum tersedia; memori reference runtime masih dikelola Python |
 | Compiler/runtime Qich-native dan self-hosted | PLANNED | source akhir wajib Qich; bootstrap seed C/Rust hanya build-time sementara, bukan runtime host permanen |
 | Formatter (indentasi + spasi, idempoten, menjaga komentar), `qh doc` | TESTED | formatter berbasis baris, bukan pretty-printer AST |

@@ -96,6 +96,13 @@ class NativeQVMSeedTests(unittest.TestCase):
                 "code": [["CONST", 0], ["CONST", 1], ["MOD"], ["HALT"]],
             }),
             ("EQ-strict-bool-int", {"constants": [True, 1], "code": [["CONST", 0], ["CONST", 1], ["EQ"], ["HALT"]]}),
+            ("EQ-string", {"constants": ["qich", "qich"], "code": [["CONST", 0], ["CONST", 1], ["EQ"], ["HALT"]]}),
+            ("NE-string", {"constants": ["qich", "Qich"], "code": [["CONST", 0], ["CONST", 1], ["NE"], ["HALT"]]}),
+            ("LT-string", {"constants": ["alpha", "beta"], "code": [["CONST", 0], ["CONST", 1], ["LT"], ["HALT"]]}),
+            ("LE-string", {"constants": ["alpha", "alpha"], "code": [["CONST", 0], ["CONST", 1], ["LE"], ["HALT"]]}),
+            ("GT-string", {"constants": ["beta", "alpha"], "code": [["CONST", 0], ["CONST", 1], ["GT"], ["HALT"]]}),
+            ("GE-string", {"constants": ["beta", "beta"], "code": [["CONST", 0], ["CONST", 1], ["GE"], ["HALT"]]}),
+            ("unicode-string-order", {"constants": ["é", "雪"], "code": [["CONST", 0], ["CONST", 1], ["LT"], ["HALT"]]}),
             ("NE", {"constants": [None, False], "code": [["CONST", 0], ["CONST", 1], ["NE"], ["HALT"]]}),
             ("LT", {"constants": [2, 3], "code": [["CONST", 0], ["CONST", 1], ["LT"], ["HALT"]]}),
             ("LE", {"constants": [3, 3], "code": [["CONST", 0], ["CONST", 1], ["LE"], ["HALT"]]}),
@@ -142,13 +149,24 @@ class NativeQVMSeedTests(unittest.TestCase):
     def test_unsupported_qvm1_values_and_opcodes_fail_closed(self):
         programs = [
             {"constants": [1.5], "code": [["CONST", 0], ["HALT"]]},
-            {"constants": ["text"], "code": [["CONST", 0], ["HALT"]]},
             {"constants": [1, 2], "code": [["CONST", 0], ["CONST", 1], ["DIV"], ["HALT"]]},
+            {"constants": ["left", "right"], "code": [["CONST", 0], ["CONST", 1], ["ADD"], ["HALT"]]},
             {"constants": [2**63], "code": [["CONST", 0], ["HALT"]]},
         ]
         for program in programs:
             with self.subTest(program=program):
                 self.assertNotEqual(self.run_program(program).returncode, 0)
+
+    def test_string_constant_output_matches_reference(self):
+        program = {"constants": ["Qich λ"], "code": [["CONST", 0], ["HALT"]]}
+        expected = render_value(execute_reference(program))
+        result = self.run_program(program)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, expected + "\n")
+
+    def test_oversized_string_constant_is_rejected(self):
+        body = b'{"code":[["CONST",0],["HALT"]],"constants":["' + b"x" * (1024 * 1024 + 1) + b'"]}'
+        self.assertNotEqual(self.run_bytes(envelope(body)).returncode, 0)
 
     def test_duplicate_json_keys_and_boolean_operands_are_rejected(self):
         bodies = [

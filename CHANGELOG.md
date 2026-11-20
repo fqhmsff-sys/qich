@@ -10,6 +10,8 @@ Perubahan penting untuk pengguna Qich dicatat di sini.
 
 ## Unreleased
 
+- Perluas native QVM1 seed agar membaca dan mencetak string constant serta menjalankan equality dan ordering comparison string; tambahkan differential tests untuk string ASCII/Unicode dan batas ukuran 1 MiB. String arithmetic, float, dan `DIV` tetap di luar subset native saat ini.
+
 - Buka input native QVM1 seed secara non-blocking agar named pipe/FIFO ditolak segera sebelum pemeriksaan regular-file; tambahkan regression test dengan batas waktu.
 
 - Tambahkan seed bootstrap native C untuk subset QVM1: validasi envelope/checksum, JSON canonical, verifier stack/control-flow, batas resource, penolakan symlink input, dan eksekusi integer/bool/nil. Seed hanya alat build-time, bergantung pada OpenSSL/json-c, dan belum full-conformance.
