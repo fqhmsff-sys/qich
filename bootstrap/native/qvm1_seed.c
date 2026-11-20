@@ -198,72 +198,92 @@ static bool parse_opcode(const char *name, Op *out) {
     return false;
 }
 
-static bool valid_utf8(const unsigned char *data, size_t length) {
-    size_t i = 0;
+static void append_unicode_escape(char *output, size_t *used, uint16_t cp) {
+    static const char hex[] = "0123456789abcdef";
+    output[(*used)++] = '\\';
+    output[(*used)++] = 'u';
+    output[(*used)++] = hex[(cp >> 12) & 15];
+    output[(*used)++] = hex[(cp >> 8) & 15];
+    output[(*used)++] = hex[(cp >> 4) & 15];
+    output[(*used)++] = hex[cp & 15];
+}
+
+/* Validate UTF-8 and escape non-ASCII code points before handing JSON to
+   json-c. The installed json-c parser rejects raw UTF-8 in strict mode, so
+   parsing an ASCII-only escaped copy keeps the wire format unchanged. */
+static bool json_escape_utf8(const unsigned char *data, size_t length,
+                             char **output, size_t *output_length) {
+    if (length > (SIZE_MAX - 1) / 3) return false;
+    size_t capacity = length * 3 + 1;
+    char *escaped = malloc(capacity);
+    if (!escaped) return false;
+    size_t i = 0, used = 0;
     while (i < length) {
         unsigned char c = data[i];
-        if (c <= 0x7f) { i++; continue; }
+        if (c <= 0x7f) {
+            escaped[used++] = (char)c;
+            i++;
+            continue;
+        }
+        uint32_t cp;
+        size_t count;
         if (c >= 0xc2 && c <= 0xdf) {
-            if (i + 1 >= length || (data[i + 1] & 0xc0) != 0x80) return false;
-            i += 2;
-            continue;
-        }
-        if (c == 0xe0) {
-            if (i + 2 >= length || data[i + 1] < 0xa0 || data[i + 1] > 0xbf ||
-                (data[i + 2] & 0xc0) != 0x80) return false;
-            i += 3;
-            continue;
-        }
-        if ((c >= 0xe1 && c <= 0xec) || (c >= 0xee && c <= 0xef)) {
+            if (i + 1 >= length || (data[i + 1] & 0xc0) != 0x80) { free(escaped); return false; }
+            cp = ((uint32_t)(c & 0x1f) << 6) | (uint32_t)(data[i + 1] & 0x3f);
+            count = 2;
+        } else if (c >= 0xe0 && c <= 0xef) {
             if (i + 2 >= length || (data[i + 1] & 0xc0) != 0x80 ||
-                (data[i + 2] & 0xc0) != 0x80) return false;
-            i += 3;
-            continue;
-        }
-        if (c == 0xed) {
-            if (i + 2 >= length || data[i + 1] < 0x80 || data[i + 1] > 0x9f ||
-                (data[i + 2] & 0xc0) != 0x80) return false;
-            i += 3;
-            continue;
-        }
-        if (c == 0xf0) {
-            if (i + 3 >= length || data[i + 1] < 0x90 || data[i + 1] > 0xbf ||
-                (data[i + 2] & 0xc0) != 0x80 || (data[i + 3] & 0xc0) != 0x80) return false;
-            i += 4;
-            continue;
-        }
-        if (c >= 0xf1 && c <= 0xf3) {
+                (data[i + 2] & 0xc0) != 0x80 ||
+                (c == 0xe0 && data[i + 1] < 0xa0) ||
+                (c == 0xed && data[i + 1] > 0x9f)) { free(escaped); return false; }
+            cp = ((uint32_t)(c & 0x0f) << 12) |
+                 ((uint32_t)(data[i + 1] & 0x3f) << 6) |
+                 (uint32_t)(data[i + 2] & 0x3f);
+            count = 3;
+        } else if (c >= 0xf0 && c <= 0xf4) {
             if (i + 3 >= length || (data[i + 1] & 0xc0) != 0x80 ||
-                (data[i + 2] & 0xc0) != 0x80 || (data[i + 3] & 0xc0) != 0x80) return false;
-            i += 4;
-            continue;
+                (data[i + 2] & 0xc0) != 0x80 || (data[i + 3] & 0xc0) != 0x80 ||
+                (c == 0xf0 && data[i + 1] < 0x90) ||
+                (c == 0xf4 && data[i + 1] > 0x8f)) { free(escaped); return false; }
+            cp = ((uint32_t)(c & 0x07) << 18) |
+                 ((uint32_t)(data[i + 1] & 0x3f) << 12) |
+                 ((uint32_t)(data[i + 2] & 0x3f) << 6) |
+                 (uint32_t)(data[i + 3] & 0x3f);
+            count = 4;
+        } else {
+            free(escaped);
+            return false;
         }
-        if (c == 0xf4) {
-            if (i + 3 >= length || data[i + 1] < 0x80 || data[i + 1] > 0x8f ||
-                (data[i + 2] & 0xc0) != 0x80 || (data[i + 3] & 0xc0) != 0x80) return false;
-            i += 4;
-            continue;
+        if (cp <= 0xffff) {
+            append_unicode_escape(escaped, &used, (uint16_t)cp);
+        } else {
+            uint32_t value = cp - 0x10000u;
+            uint16_t high = (uint16_t)(0xd800u + (value >> 10));
+            uint16_t low = (uint16_t)(0xdc00u + (value & 0x3ffu));
+            append_unicode_escape(escaped, &used, high);
+            append_unicode_escape(escaped, &used, low);
         }
-        return false;
+        i += count;
     }
+    escaped[used] = '\0';
+    *output = escaped;
+    *output_length = used;
     return true;
 }
 
 static bool parse_program(const unsigned char *body, size_t body_len, Program *program) {
-    if (!valid_utf8(body, body_len)) return false;
+    char *escaped_body = NULL;
+    size_t escaped_length = 0;
+    if (!json_escape_utf8(body, body_len, &escaped_body, &escaped_length)) return false;
     struct json_tokener *tok = json_tokener_new_ex(32);
-    if (!tok) return false;
+    if (!tok) { free(escaped_body); return false; }
     json_tokener_set_flags(tok, JSON_TOKENER_STRICT);
-    struct json_object *root = json_tokener_parse_ex(tok, (const char *)body, (int)body_len);
-    enum json_tokener_error parse_error = json_tokener_get_error(tok);
-    size_t parse_end = json_tokener_get_parse_end(tok);
-    bool parsed = root && parse_error == json_tokener_success && parse_end == body_len;
+    struct json_object *root = json_tokener_parse_ex(tok, escaped_body, (int)escaped_length);
+    bool parsed = root && json_tokener_get_error(tok) == json_tokener_success &&
+                  json_tokener_get_parse_end(tok) == escaped_length;
     json_tokener_free(tok);
-    if (!parsed) {
-        fprintf(stderr, "qvm1-seed: JSON parse error=%s end=%zu length=%zu\\n", json_tokener_error_desc(parse_error), parse_end, body_len);
-        if (root) json_object_put(root);
-        return false;
-    }
+    free(escaped_body);
+    if (!parsed) { if (root) json_object_put(root); return false; }
 
     /* Canonical form also rejects duplicate keys and alternate encodings. */
     const char *canonical = json_object_to_json_string_ext(root, JSON_C_TO_STRING_PLAIN);

@@ -10,7 +10,7 @@ Perubahan penting untuk pengguna Qich dicatat di sini.
 
 ## Unreleased
 
-- Perluas native QVM1 seed agar membaca dan mencetak string constant serta menjalankan equality dan ordering comparison string; normalisasi escape Unicode JSON-C ke UTF-8 kanonis QVM1, validasi UTF-8 mentah secara ketat sebelum parsing, uji pasangan surrogate, penolakan surrogate tak berpasangan/UTF-8 invalid, dan pertahankan teks literal yang menyerupai escape. String arithmetic, float, dan `DIV` tetap di luar subset native saat ini.
+- Perluas native QVM1 seed agar membaca dan mencetak string constant serta menjalankan equality dan ordering comparison string; normalisasi escape Unicode JSON-C ke UTF-8 kanonis QVM1, validasi UTF-8 mentah secara ketat dan escape non-ASCII sebelum parsing json-c, uji pasangan surrogate, penolakan surrogate tak berpasangan/UTF-8 invalid, dan pertahankan teks literal yang menyerupai escape. String arithmetic, float, dan `DIV` tetap di luar subset native saat ini.
 
 - Buka input native QVM1 seed secara non-blocking agar named pipe/FIFO ditolak segera sebelum pemeriksaan regular-file; tambahkan regression test dengan batas waktu.
 
