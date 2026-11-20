@@ -215,6 +215,12 @@ static bool parse_program(const unsigned char *body, size_t body_len, Program *p
     bool normalized = canonical && canonical_json_utf8(canonical, &canonical_utf8, &canonical_length);
     bool canonical_match = normalized && canonical_length == body_len &&
                            memcmp(canonical_utf8, body, body_len) == 0;
+    if (!canonical_match) {
+        fprintf(stderr, "qvm1-seed: canonical mismatch normalized=%d canonical=%zu body=%zu\\n",
+                normalized ? 1 : 0, canonical_length, body_len);
+        if (canonical) fprintf(stderr, "qvm1-seed: serializer=%.180s\\n", canonical);
+        if (canonical_utf8) fprintf(stderr, "qvm1-seed: normalized=%.180s\\n", canonical_utf8);
+    }
     free(canonical_utf8);
     if (!canonical_match || json_object_get_type(root) != json_type_object || json_object_object_length(root) != 2) {
         json_object_put(root); return false;
