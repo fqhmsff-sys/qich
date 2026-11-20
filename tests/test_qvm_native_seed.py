@@ -103,6 +103,7 @@ class NativeQVMSeedTests(unittest.TestCase):
             ("GT-string", {"constants": ["beta", "alpha"], "code": [["CONST", 0], ["CONST", 1], ["GT"], ["HALT"]]}),
             ("GE-string", {"constants": ["beta", "beta"], "code": [["CONST", 0], ["CONST", 1], ["GE"], ["HALT"]]}),
             ("unicode-string-order", {"constants": ["é", "雪"], "code": [["CONST", 0], ["CONST", 1], ["LT"], ["HALT"]]}),
+            ("unicode-supplementary-plane", {"constants": ["🙂", "🦊"], "code": [["CONST", 0], ["CONST", 1], ["LT"], ["HALT"]]}),
             ("NE", {"constants": [None, False], "code": [["CONST", 0], ["CONST", 1], ["NE"], ["HALT"]]}),
             ("LT", {"constants": [2, 3], "code": [["CONST", 0], ["CONST", 1], ["LT"], ["HALT"]]}),
             ("LE", {"constants": [3, 3], "code": [["CONST", 0], ["CONST", 1], ["LE"], ["HALT"]]}),
@@ -166,6 +167,10 @@ class NativeQVMSeedTests(unittest.TestCase):
 
     def test_oversized_string_constant_is_rejected(self):
         body = b'{"code":[["CONST",0],["HALT"]],"constants":["' + b"x" * (1024 * 1024 + 1) + b'"]}'
+        self.assertNotEqual(self.run_bytes(envelope(body)).returncode, 0)
+
+    def test_unpaired_unicode_surrogate_is_rejected(self):
+        body = b'{"code":[["CONST",0],["HALT"]],"constants":["\\ud800"]}'
         self.assertNotEqual(self.run_bytes(envelope(body)).returncode, 0)
 
     def test_duplicate_json_keys_and_boolean_operands_are_rejected(self):

@@ -88,6 +88,94 @@ static bool get_value(struct json_object *item, Value *out) {
     return false;
 }
 
+static int hex_digit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static bool append_utf8(char *output, size_t capacity, size_t *used, uint32_t cp) {
+    unsigned char bytes[4];
+    size_t count;
+    if (cp <= 0x7f) {
+        bytes[0] = (unsigned char)cp;
+        count = 1;
+    } else if (cp <= 0x7ff) {
+        bytes[0] = (unsigned char)(0xc0 | (cp >> 6));
+        bytes[1] = (unsigned char)(0x80 | (cp & 0x3f));
+        count = 2;
+    } else if (cp <= 0xffff) {
+        if (cp >= 0xd800 && cp <= 0xdfff) return false;
+        bytes[0] = (unsigned char)(0xe0 | (cp >> 12));
+        bytes[1] = (unsigned char)(0x80 | ((cp >> 6) & 0x3f));
+        bytes[2] = (unsigned char)(0x80 | (cp & 0x3f));
+        count = 3;
+    } else if (cp <= 0x10ffff) {
+        bytes[0] = (unsigned char)(0xf0 | (cp >> 18));
+        bytes[1] = (unsigned char)(0x80 | ((cp >> 12) & 0x3f));
+        bytes[2] = (unsigned char)(0x80 | ((cp >> 6) & 0x3f));
+        bytes[3] = (unsigned char)(0x80 | (cp & 0x3f));
+        count = 4;
+    } else return false;
+    if (*used > capacity || count > capacity - *used) return false;
+    memcpy(output + *used, bytes, count);
+    *used += count;
+    return true;
+}
+
+/* json-c escapes non-ASCII while QVM1 canonical JSON stores valid UTF-8
+   directly. Normalize only serializer-produced Unicode escapes before the
+   byte-for-byte canonical comparison; control escapes remain escaped. */
+static bool canonical_json_utf8(const char *input, char **output, size_t *output_length) {
+    size_t length = strlen(input);
+    char *normalized = malloc(length + 1);
+    if (!normalized) return false;
+    size_t i = 0, used = 0;
+    while (i < length) {
+        if (input[i] == '\\' && i + 5 < length && input[i + 1] == 'u') {
+            int h0 = hex_digit(input[i + 2]), h1 = hex_digit(input[i + 3]);
+            int h2 = hex_digit(input[i + 4]), h3 = hex_digit(input[i + 5]);
+            if (h0 < 0 || h1 < 0 || h2 < 0 || h3 < 0) { free(normalized); return false; }
+            uint32_t cp = (uint32_t)((h0 << 12) | (h1 << 8) | (h2 << 4) | h3);
+            size_t consumed = 6;
+            if (cp >= 0xd800 && cp <= 0xdbff) {
+                if (i + 11 >= length || input[i + 6] != '\\' || input[i + 7] != 'u') {
+                    free(normalized); return false;
+                }
+                int l0 = hex_digit(input[i + 8]), l1 = hex_digit(input[i + 9]);
+                int l2 = hex_digit(input[i + 10]), l3 = hex_digit(input[i + 11]);
+                if (l0 < 0 || l1 < 0 || l2 < 0 || l3 < 0) { free(normalized); return false; }
+                uint32_t low = (uint32_t)((l0 << 12) | (l1 << 8) | (l2 << 4) | l3);
+                if (low < 0xdc00 || low > 0xdfff) { free(normalized); return false; }
+                cp = 0x10000u + ((cp - 0xd800u) << 10) + (low - 0xdc00u);
+                consumed = 12;
+            } else if (cp >= 0xdc00 && cp <= 0xdfff) {
+                free(normalized); return false;
+            }
+            if (cp < 0x20) {
+                memcpy(normalized + used, input + i, consumed);
+                used += consumed;
+            } else if (cp == '"') {
+                normalized[used++] = '\\';
+                normalized[used++] = '"';
+            } else if (cp == '\\') {
+                normalized[used++] = '\\';
+                normalized[used++] = '\\';
+            } else if (!append_utf8(normalized, length, &used, cp)) {
+                free(normalized); return false;
+            }
+            i += consumed;
+            continue;
+        }
+        normalized[used++] = input[i++];
+    }
+    normalized[used] = '\0';
+    *output = normalized;
+    *output_length = used;
+    return true;
+}
+
 static bool parse_opcode(const char *name, Op *out) {
 #define OP(name_text, value) if (strcmp(name, name_text) == 0) { *out = value; return true; }
     OP("CONST", OP_CONST) OP("POP", OP_POP) OP("DUP", OP_DUP)
@@ -114,7 +202,12 @@ static bool parse_program(const unsigned char *body, size_t body_len, Program *p
 
     /* Canonical form also rejects duplicate keys and alternate encodings. */
     const char *canonical = json_object_to_json_string_ext(root, JSON_C_TO_STRING_PLAIN);
-    bool canonical_match = canonical && strlen(canonical) == body_len && memcmp(canonical, body, body_len) == 0;
+    char *canonical_utf8 = NULL;
+    size_t canonical_length = 0;
+    bool normalized = canonical && canonical_json_utf8(canonical, &canonical_utf8, &canonical_length);
+    bool canonical_match = normalized && canonical_length == body_len &&
+                           memcmp(canonical_utf8, body, body_len) == 0;
+    free(canonical_utf8);
     if (!canonical_match || json_object_get_type(root) != json_type_object || json_object_object_length(root) != 2) {
         json_object_put(root); return false;
     }
