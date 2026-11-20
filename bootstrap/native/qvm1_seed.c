@@ -125,50 +125,58 @@ static bool append_utf8(char *output, size_t capacity, size_t *used, uint32_t cp
 }
 
 /* json-c escapes non-ASCII while QVM1 canonical JSON stores valid UTF-8
-   directly. Normalize only serializer-produced Unicode escapes before the
-   byte-for-byte canonical comparison; control escapes remain escaped. */
+   directly. Normalize serializer-produced Unicode escapes while preserving
+   all other JSON escapes exactly, so literal text such as "\\u03bb" is not
+   decoded a second time. */
 static bool canonical_json_utf8(const char *input, char **output, size_t *output_length) {
     size_t length = strlen(input);
     char *normalized = malloc(length + 1);
     if (!normalized) return false;
     size_t i = 0, used = 0;
     while (i < length) {
-        if (input[i] == '\\' && i + 5 < length && input[i + 1] == 'u') {
-            int h0 = hex_digit(input[i + 2]), h1 = hex_digit(input[i + 3]);
-            int h2 = hex_digit(input[i + 4]), h3 = hex_digit(input[i + 5]);
-            if (h0 < 0 || h1 < 0 || h2 < 0 || h3 < 0) { free(normalized); return false; }
-            uint32_t cp = (uint32_t)((h0 << 12) | (h1 << 8) | (h2 << 4) | h3);
-            size_t consumed = 6;
-            if (cp >= 0xd800 && cp <= 0xdbff) {
-                if (i + 11 >= length || input[i + 6] != '\\' || input[i + 7] != 'u') {
-                    free(normalized); return false;
-                }
-                int l0 = hex_digit(input[i + 8]), l1 = hex_digit(input[i + 9]);
-                int l2 = hex_digit(input[i + 10]), l3 = hex_digit(input[i + 11]);
-                if (l0 < 0 || l1 < 0 || l2 < 0 || l3 < 0) { free(normalized); return false; }
-                uint32_t low = (uint32_t)((l0 << 12) | (l1 << 8) | (l2 << 4) | l3);
-                if (low < 0xdc00 || low > 0xdfff) { free(normalized); return false; }
-                cp = 0x10000u + ((cp - 0xd800u) << 10) + (low - 0xdc00u);
-                consumed = 12;
-            } else if (cp >= 0xdc00 && cp <= 0xdfff) {
-                free(normalized); return false;
-            }
-            if (cp < 0x20) {
-                memcpy(normalized + used, input + i, consumed);
-                used += consumed;
-            } else if (cp == '"') {
-                normalized[used++] = '\\';
-                normalized[used++] = '"';
-            } else if (cp == '\\') {
-                normalized[used++] = '\\';
-                normalized[used++] = '\\';
-            } else if (!append_utf8(normalized, length, &used, cp)) {
-                free(normalized); return false;
-            }
-            i += consumed;
+        if (input[i] != '\\') {
+            normalized[used++] = input[i++];
             continue;
         }
-        normalized[used++] = input[i++];
+        if (i + 1 >= length) { free(normalized); return false; }
+        if (input[i + 1] != 'u') {
+            normalized[used++] = input[i++];
+            normalized[used++] = input[i++];
+            continue;
+        }
+        if (i + 5 >= length) { free(normalized); return false; }
+        int h0 = hex_digit(input[i + 2]), h1 = hex_digit(input[i + 3]);
+        int h2 = hex_digit(input[i + 4]), h3 = hex_digit(input[i + 5]);
+        if (h0 < 0 || h1 < 0 || h2 < 0 || h3 < 0) { free(normalized); return false; }
+        uint32_t cp = (uint32_t)((h0 << 12) | (h1 << 8) | (h2 << 4) | h3);
+        size_t consumed = 6;
+        if (cp >= 0xd800 && cp <= 0xdbff) {
+            if (i + 11 >= length || input[i + 6] != '\\' || input[i + 7] != 'u') {
+                free(normalized); return false;
+            }
+            int l0 = hex_digit(input[i + 8]), l1 = hex_digit(input[i + 9]);
+            int l2 = hex_digit(input[i + 10]), l3 = hex_digit(input[i + 11]);
+            if (l0 < 0 || l1 < 0 || l2 < 0 || l3 < 0) { free(normalized); return false; }
+            uint32_t low = (uint32_t)((l0 << 12) | (l1 << 8) | (l2 << 4) | l3);
+            if (low < 0xdc00 || low > 0xdfff) { free(normalized); return false; }
+            cp = 0x10000u + ((cp - 0xd800u) << 10) + (low - 0xdc00u);
+            consumed = 12;
+        } else if (cp >= 0xdc00 && cp <= 0xdfff) {
+            free(normalized); return false;
+        }
+        if (cp < 0x20) {
+            memcpy(normalized + used, input + i, consumed);
+            used += consumed;
+        } else if (cp == '"') {
+            normalized[used++] = '\\';
+            normalized[used++] = '"';
+        } else if (cp == '\\') {
+            normalized[used++] = '\\';
+            normalized[used++] = '\\';
+        } else if (!append_utf8(normalized, length, &used, cp)) {
+            free(normalized); return false;
+        }
+        i += consumed;
     }
     normalized[used] = '\0';
     *output = normalized;

@@ -165,6 +165,13 @@ class NativeQVMSeedTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, expected + "\n")
 
+    def test_unicode_escape_like_literal_is_preserved(self):
+        program = {"constants": [r"\\u03bb"], "code": [["CONST", 0], ["HALT"]]}
+        expected = render_value(execute_reference(program))
+        result = self.run_program(program)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, expected + "\\n")
+
     def test_oversized_string_constant_is_rejected(self):
         body = b'{"code":[["CONST",0],["HALT"]],"constants":["' + b"x" * (1024 * 1024 + 1) + b'"]}'
         self.assertNotEqual(self.run_bytes(envelope(body)).returncode, 0)
