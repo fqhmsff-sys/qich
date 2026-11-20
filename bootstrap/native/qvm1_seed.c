@@ -255,10 +255,15 @@ static bool parse_program(const unsigned char *body, size_t body_len, Program *p
     if (!tok) return false;
     json_tokener_set_flags(tok, JSON_TOKENER_STRICT);
     struct json_object *root = json_tokener_parse_ex(tok, (const char *)body, (int)body_len);
-    bool parsed = root && json_tokener_get_error(tok) == json_tokener_success &&
-                  json_tokener_get_parse_end(tok) == body_len;
+    enum json_tokener_error parse_error = json_tokener_get_error(tok);
+    size_t parse_end = json_tokener_get_parse_end(tok);
+    bool parsed = root && parse_error == json_tokener_success && parse_end == body_len;
     json_tokener_free(tok);
-    if (!parsed) { if (root) json_object_put(root); return false; }
+    if (!parsed) {
+        fprintf(stderr, "qvm1-seed: JSON parse error=%s end=%zu length=%zu\\n", json_tokener_error_desc(parse_error), parse_end, body_len);
+        if (root) json_object_put(root);
+        return false;
+    }
 
     /* Canonical form also rejects duplicate keys and alternate encodings. */
     const char *canonical = json_object_to_json_string_ext(root, JSON_C_TO_STRING_PLAIN);
@@ -267,6 +272,9 @@ static bool parse_program(const unsigned char *body, size_t body_len, Program *p
     bool normalized = canonical && canonical_json_utf8(canonical, &canonical_utf8, &canonical_length);
     bool canonical_match = normalized && canonical_length == body_len &&
                            memcmp(canonical_utf8, body, body_len) == 0;
+    if (!canonical_match) {
+        fprintf(stderr, "qvm1-seed: canonical mismatch normalized=%d canonical=%zu body=%zu\\n", normalized ? 1 : 0, canonical_length, body_len);
+    }
     free(canonical_utf8);
     if (!canonical_match || json_object_get_type(root) != json_type_object || json_object_object_length(root) != 2) {
         json_object_put(root); return false;
@@ -276,7 +284,7 @@ static bool parse_program(const unsigned char *body, size_t body_len, Program *p
                   json_object_object_get_ex(root, "constants", &constants) &&
                   code && constants && json_object_get_type(code) == json_type_array &&
                   json_object_get_type(constants) == json_type_array;
-    if (!fields) { json_object_put(root); return false; }
+    if (!fields) { fprintf(stderr, "qvm1-seed: root fields invalid\\n"); json_object_put(root); return false; }
     size_t code_count = json_object_array_length(code);
     size_t constant_count = json_object_array_length(constants);
     if (code_count > MAX_ITEMS || constant_count > MAX_ITEMS) { json_object_put(root); return false; }
@@ -288,8 +296,10 @@ static bool parse_program(const unsigned char *body, size_t body_len, Program *p
     program->constant_count = constant_count;
 
     bool ok = true;
-    for (size_t i = 0; i < constant_count && ok; i++)
+    for (size_t i = 0; i < constant_count && ok; i++) {
         ok = get_value(json_object_array_get_idx(constants, i), &program->constants[i]);
+        if (!ok) fprintf(stderr, "qvm1-seed: constant %zu rejected\\n", i);
+    }
     for (size_t i = 0; i < code_count && ok; i++) {
         struct json_object *row = json_object_array_get_idx(code, i);
         if (!row || json_object_get_type(row) != json_type_array) { ok = false; break; }
@@ -511,7 +521,8 @@ int main(int argc, char **argv) {
     Program program = {0};
     bool parsed = parse_program(body, body_len, &program);
     free(data);
-    if (!parsed || !validate(&program)) {
+    if (!parsed) { free_program(&program); return fail("payload JSON tidak valid"); }
+    if (!validate(&program)) {
         free_program(&program);
         return fail("payload tidak valid atau di luar subset bootstrap seed");
     }
