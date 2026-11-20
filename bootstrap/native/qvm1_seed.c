@@ -198,21 +198,67 @@ static bool parse_opcode(const char *name, Op *out) {
     return false;
 }
 
-static bool parse_program(const unsigned char *body, size_t body_len, Program *program) {
-    struct json_tokener *tok = json_tokener_new_ex(32);
-    if (!tok) return false;
-    json_tokener_set_flags(tok, JSON_TOKENER_STRICT | JSON_TOKENER_VALIDATE_UTF8);
-    struct json_object *root = json_tokener_parse_ex(tok, (const char *)body, (int)body_len);
-    enum json_tokener_error parse_error = json_tokener_get_error(tok);
-    size_t parse_end = json_tokener_get_parse_end(tok);
-    bool parsed = root && parse_error == json_tokener_success && parse_end == body_len;
-    json_tokener_free(tok);
-    if (!parsed) {
-        fprintf(stderr, "qvm1-seed: JSON parse failed error=%s end=%zu length=%zu\\n",
-                json_tokener_error_desc(parse_error), parse_end, body_len);
-        if (root) json_object_put(root);
+static bool valid_utf8(const unsigned char *data, size_t length) {
+    size_t i = 0;
+    while (i < length) {
+        unsigned char c = data[i];
+        if (c <= 0x7f) { i++; continue; }
+        if (c >= 0xc2 && c <= 0xdf) {
+            if (i + 1 >= length || (data[i + 1] & 0xc0) != 0x80) return false;
+            i += 2;
+            continue;
+        }
+        if (c == 0xe0) {
+            if (i + 2 >= length || data[i + 1] < 0xa0 || data[i + 1] > 0xbf ||
+                (data[i + 2] & 0xc0) != 0x80) return false;
+            i += 3;
+            continue;
+        }
+        if ((c >= 0xe1 && c <= 0xec) || (c >= 0xee && c <= 0xef)) {
+            if (i + 2 >= length || (data[i + 1] & 0xc0) != 0x80 ||
+                (data[i + 2] & 0xc0) != 0x80) return false;
+            i += 3;
+            continue;
+        }
+        if (c == 0xed) {
+            if (i + 2 >= length || data[i + 1] < 0x80 || data[i + 1] > 0x9f ||
+                (data[i + 2] & 0xc0) != 0x80) return false;
+            i += 3;
+            continue;
+        }
+        if (c == 0xf0) {
+            if (i + 3 >= length || data[i + 1] < 0x90 || data[i + 1] > 0xbf ||
+                (data[i + 2] & 0xc0) != 0x80 || (data[i + 3] & 0xc0) != 0x80) return false;
+            i += 4;
+            continue;
+        }
+        if (c >= 0xf1 && c <= 0xf3) {
+            if (i + 3 >= length || (data[i + 1] & 0xc0) != 0x80 ||
+                (data[i + 2] & 0xc0) != 0x80 || (data[i + 3] & 0xc0) != 0x80) return false;
+            i += 4;
+            continue;
+        }
+        if (c == 0xf4) {
+            if (i + 3 >= length || data[i + 1] < 0x80 || data[i + 1] > 0x8f ||
+                (data[i + 2] & 0xc0) != 0x80 || (data[i + 3] & 0xc0) != 0x80) return false;
+            i += 4;
+            continue;
+        }
         return false;
     }
+    return true;
+}
+
+static bool parse_program(const unsigned char *body, size_t body_len, Program *program) {
+    if (!valid_utf8(body, body_len)) return false;
+    struct json_tokener *tok = json_tokener_new_ex(32);
+    if (!tok) return false;
+    json_tokener_set_flags(tok, JSON_TOKENER_STRICT);
+    struct json_object *root = json_tokener_parse_ex(tok, (const char *)body, (int)body_len);
+    bool parsed = root && json_tokener_get_error(tok) == json_tokener_success &&
+                  json_tokener_get_parse_end(tok) == body_len;
+    json_tokener_free(tok);
+    if (!parsed) { if (root) json_object_put(root); return false; }
 
     /* Canonical form also rejects duplicate keys and alternate encodings. */
     const char *canonical = json_object_to_json_string_ext(root, JSON_C_TO_STRING_PLAIN);
@@ -221,12 +267,6 @@ static bool parse_program(const unsigned char *body, size_t body_len, Program *p
     bool normalized = canonical && canonical_json_utf8(canonical, &canonical_utf8, &canonical_length);
     bool canonical_match = normalized && canonical_length == body_len &&
                            memcmp(canonical_utf8, body, body_len) == 0;
-    if (!canonical_match) {
-        fprintf(stderr, "qvm1-seed: canonical mismatch normalized=%d canonical=%zu body=%zu\\n",
-                normalized ? 1 : 0, canonical_length, body_len);
-        if (canonical) fprintf(stderr, "qvm1-seed: serializer=%.180s\\n", canonical);
-        if (canonical_utf8) fprintf(stderr, "qvm1-seed: normalized=%.180s\\n", canonical_utf8);
-    }
     free(canonical_utf8);
     if (!canonical_match || json_object_get_type(root) != json_type_object || json_object_object_length(root) != 2) {
         json_object_put(root); return false;
@@ -236,7 +276,7 @@ static bool parse_program(const unsigned char *body, size_t body_len, Program *p
                   json_object_object_get_ex(root, "constants", &constants) &&
                   code && constants && json_object_get_type(code) == json_type_array &&
                   json_object_get_type(constants) == json_type_array;
-    if (!fields) { fprintf(stderr, "qvm1-seed: invalid root fields\\n"); json_object_put(root); return false; }
+    if (!fields) { json_object_put(root); return false; }
     size_t code_count = json_object_array_length(code);
     size_t constant_count = json_object_array_length(constants);
     if (code_count > MAX_ITEMS || constant_count > MAX_ITEMS) { json_object_put(root); return false; }
@@ -248,10 +288,8 @@ static bool parse_program(const unsigned char *body, size_t body_len, Program *p
     program->constant_count = constant_count;
 
     bool ok = true;
-    for (size_t i = 0; i < constant_count && ok; i++) {
+    for (size_t i = 0; i < constant_count && ok; i++)
         ok = get_value(json_object_array_get_idx(constants, i), &program->constants[i]);
-        if (!ok) fprintf(stderr, "qvm1-seed: invalid constant at index %zu\\n", i);
-    }
     for (size_t i = 0; i < code_count && ok; i++) {
         struct json_object *row = json_object_array_get_idx(code, i);
         if (!row || json_object_get_type(row) != json_type_array) { ok = false; break; }

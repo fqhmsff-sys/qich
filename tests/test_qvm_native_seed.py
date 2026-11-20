@@ -176,6 +176,10 @@ class NativeQVMSeedTests(unittest.TestCase):
         body = b'{"code":[["CONST",0],["HALT"]],"constants":["' + b"x" * (1024 * 1024 + 1) + b'"]}'
         self.assertNotEqual(self.run_bytes(envelope(body)).returncode, 0)
 
+    def test_invalid_utf8_string_is_rejected(self):
+        body = b'{"code":[["CONST",0],["HALT"]],"constants":["\\xff"]}'
+        self.assertNotEqual(self.run_bytes(envelope(body)).returncode, 0)
+
     def test_unpaired_unicode_surrogate_is_rejected(self):
         body = b'{"code":[["CONST",0],["HALT"]],"constants":["\\ud800"]}'
         self.assertNotEqual(self.run_bytes(envelope(body)).returncode, 0)
