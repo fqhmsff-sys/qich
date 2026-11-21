@@ -221,16 +221,16 @@ class NativeQVMSeedTests(unittest.TestCase):
 
     def test_embedded_nul_string_matches_reference(self):
         cases = [
-            {"constants": ["a\\0b"], "code": [["CONST", 0], ["HALT"]]},
-            {"constants": ["a\\0b", "a\\0c"], "code": [["CONST", 0], ["CONST", 1], ["LT"], ["HALT"]]},
-            {"constants": ["a\\0b", "a\\0b"], "code": [["CONST", 0], ["CONST", 1], ["EQ"], ["HALT"]]},
+            {"constants": ["a\0b"], "code": [["CONST", 0], ["HALT"]]},
+            {"constants": ["a\0b", "a\0c"], "code": [["CONST", 0], ["CONST", 1], ["LT"], ["HALT"]]},
+            {"constants": ["a\0b", "a\0b"], "code": [["CONST", 0], ["CONST", 1], ["EQ"], ["HALT"]]},
         ]
         for program in cases:
             with self.subTest(program=program):
                 expected = render_value(execute_reference(program))
                 result = self.run_program(program)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout, expected + "\\n")
+                self.assertEqual(result.stdout, expected + "\n")
 
     def test_deterministic_malformed_payload_fuzz_smoke(self):
         rng = random.Random(0x51494348)
