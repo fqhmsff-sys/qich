@@ -1,6 +1,8 @@
 """Smoke, rejection, and differential tests for the temporary native QVM1 seed."""
 import hashlib
+import json
 import os
+import random
 import shutil
 import subprocess
 import tempfile
@@ -43,7 +45,7 @@ class NativeQVMSeedTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.temp.cleanup()
 
-    def run_bytes(self, data, *, path=None):
+    def run_bytes(self, data, *, path=None, timeout=None):
         if path is None:
             handle = tempfile.NamedTemporaryFile(dir=self.temp.name, delete=False)
             path = Path(handle.name)
@@ -54,10 +56,10 @@ class NativeQVMSeedTests(unittest.TestCase):
                 if not handle.closed:
                     handle.close()
             try:
-                return subprocess.run([str(self.binary), str(path)], capture_output=True, text=True)
+                return subprocess.run([str(self.binary), str(path)], capture_output=True, text=True, timeout=timeout)
             finally:
                 path.unlink(missing_ok=True)
-        return subprocess.run([str(self.binary), str(path)], capture_output=True, text=True)
+        return subprocess.run([str(self.binary), str(path)], capture_output=True, text=True, timeout=timeout)
 
     def run_program(self, program):
         return self.run_bytes(encode(program))
@@ -215,6 +217,60 @@ class NativeQVMSeedTests(unittest.TestCase):
         result = self.run_program(minimum_modulo)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "0\n")
+
+
+    def test_embedded_nul_string_matches_reference(self):
+        cases = [
+            {"constants": ["a\\0b"], "code": [["CONST", 0], ["HALT"]]},
+            {"constants": ["a\\0b", "a\\0c"], "code": [["CONST", 0], ["CONST", 1], ["LT"], ["HALT"]]},
+            {"constants": ["a\\0b", "a\\0b"], "code": [["CONST", 0], ["CONST", 1], ["EQ"], ["HALT"]]},
+        ]
+        for program in cases:
+            with self.subTest(program=program):
+                expected = render_value(execute_reference(program))
+                result = self.run_program(program)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, expected + "\\n")
+
+    def test_deterministic_malformed_payload_fuzz_smoke(self):
+        rng = random.Random(0x51494348)
+        baseline = encode({"constants": [1], "code": [["CONST", 0], ["HALT"]]})[70:]
+        payloads = []
+
+        for _ in range(32):
+            mutated = bytearray(baseline)
+            for _ in range(rng.randint(1, 4)):
+                position = rng.randrange(len(mutated))
+                mutated[position] = rng.randrange(256)
+            payloads.append(bytes(mutated))
+
+        atoms = [None, True, False, 0, -1, 1.5, "lambda-λ", "emoji-🙂", [], {}, 2**80]
+        opcodes = ["HALT", "POP", "DUP", "NOT", "NEG", "DIV", "EVAL_PYTHON", "CONST", "JUMP"]
+        for index in range(32):
+            constants = [rng.choice(atoms)]
+            opcode = rng.choice(opcodes)
+            if opcode == "CONST":
+                instruction = [opcode, rng.choice([0, 1, -1, True, "0"])]
+            elif opcode == "JUMP":
+                instruction = [opcode, 1]
+            else:
+                instruction = [opcode]
+            root = {"code": [instruction, ["HALT"]], "constants": constants}
+            if index % 4 == 0:
+                root = {"code": [instruction, ["HALT"]]}
+            elif index % 4 == 1:
+                root["unexpected"] = 0
+            payloads.append(json.dumps(
+                root, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8"))
+
+        for index, body in enumerate(payloads):
+            with self.subTest(case=index):
+                result = self.run_bytes(envelope(body), timeout=2)
+                self.assertGreaterEqual(
+                    result.returncode, 0,
+                    "native seed terminated by signal for fuzz case %d: %r" % (index, result.stderr),
+                )
 
     @unittest.skipUnless(os.name == "posix", "O_NOFOLLOW is POSIX-specific")
     def test_symlink_input_is_rejected(self):
