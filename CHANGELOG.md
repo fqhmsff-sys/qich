@@ -10,8 +10,36 @@ Perubahan penting untuk pengguna Qich dicatat di sini.
 
 ## Unreleased
 
+- Perluas pengujian native QVM1 dengan regression cases untuk embedded NUL pada string serta 64 deterministic malformed-payload fuzz smoke cases (checksum dihitung ulang dan setiap proses diberi timeout); perbarui jumlah differential cases yang terdokumentasi dari 23 menjadi 31.
+
+- Perluas native QVM1 seed agar membaca dan mencetak string constant serta menjalankan equality dan ordering comparison string; normalisasi escape Unicode JSON-C ke UTF-8 kanonis QVM1, validasi UTF-8 mentah secara ketat dan escape non-ASCII sebelum parsing json-c, uji pasangan surrogate, penolakan surrogate tak berpasangan/UTF-8 invalid, pertahankan teks literal yang menyerupai escape, dan bersihkan diagnostik sementara setelah conformance tests lulus. String arithmetic, float, dan `DIV` tetap di luar subset native saat ini.
+
+- Buka input native QVM1 seed secara non-blocking agar named pipe/FIFO ditolak segera sebelum pemeriksaan regular-file; tambahkan regression test dengan batas waktu.
+
+- Tambahkan seed bootstrap native C untuk subset QVM1: validasi envelope/checksum, JSON canonical, verifier stack/control-flow, batas resource, penolakan symlink input, dan eksekusi integer/bool/nil. Seed hanya alat build-time, bergantung pada OpenSSL/json-c, dan belum full-conformance.
+- Snapshot source QVM1 dalam Qich kini menyalin constant pool serta instruction stream bersarang sebelum validasi/eksekusi; tambahkan regression test untuk mutasi list caller setelah snapshot.
+
+- Simpan snapshot prepared QVM1 di registry internal terpisah dari handle opaque agar bypass pembekuan objek melalui `object.__setattr__` tidak mengubah bytecode yang dieksekusi; tambahkan regression test.
+
+- Tambahkan `bootstrap/qvm1.qh`: prototype verifier dan executor QVM1 yang ditulis dalam Qich, dengan differential tests terhadap reference VM. Source ini masih dijalankan melalui Python reference runtime dan belum menjadi native bootstrap.
+- Integrasikan QVM1 versioned bytecode, verifier, reference executor, subset compiler, prepared execution, differential corpus, dan benchmark ke branch Qich v2. QVM tetap EXPERIMENTAL dan masih berjalan di Python; belum ada klaim native/self-hosted.
+- Perketat publikasi paket dengan membuka file sumber melalui descriptor no-follow, mencocokkan identitas file dengan fstat, dan membatasi jumlah byte aktual yang di-stream ke ZIP agar pergantian symlink atau pertumbuhan file setelah stat tidak melewati batas.
+- Normalisasi denylist JavaScript untuk builtin Node, termasuk awalan node: dan subpath, serta tambah regression tests protokol bridge.
+- Tolak root path dependency yang berupa symlink sebelum realpath; pemeriksaan hash tidak boleh dilewati dengan mengkanonisasi symlink terlebih dahulu.
 - Perketat validasi versi artifact `.qhc` agar boolean tidak diterima sebagai versi integer.
 - Perbaiki tes keamanan artifact agar payload malformed diuji dengan header dan checksum yang valid.
 - Tambahkan pemeriksaan build wheel dan source distribution ke GitHub Actions.
 - Tambahkan checklist kesiapan rilis dan perjelas status instalasi paket pada dokumentasi.
+- Perketat ekstraksi arsip paket: tolak Windows drive/ADS, nama perangkat, segmen ambigu, collision lintas kapitalisasi, dan konflik file/direktori.
+- Ekstrak anggota ZIP secara streaming dengan buffer 64 KiB dan batas ukuran aktual; tulis melalui file sementara sebelum mengganti target.
+- Tolak symlink dan file khusus pada pohon dependensi lokal sebelum hashing/penyalinan, sehingga konten di luar paket tidak ikut tersalin diam-diam.
+- Perbarui action CI checkout, setup-python, upload-artifact, dan release ke rilis berbasis Node 24 agar tidak bergantung pada runtime Node 20 yang deprecated.
 - Batasan tetap berlaku: checksum `.qhc` bukan tanda tangan digital; bridge Python bukan sandbox; platform selain Linux belum diverifikasi CI.
+- Gagal tertutup saat enumerasi pohon paket tidak lengkap: hashing dependensi dan publikasi registry tidak boleh menerima hash/arsip parsial jika traversal direktori menghasilkan error.
+- Samakan batas digit komponen versi `qh.lock` dengan registry agar versi lockfile malformed ditolak sebelum resolusi.
+- Tolak direktori vendor `.qh/deps`, entri dependensi, akar hashing, dan tujuan ekstraksi ZIP yang berupa symlink; buat serta validasi direktori vendor tanpa mengikuti symlink.
+- Lindungi `qh.lock` dari symlink saat dibaca/ditulis, batasi ukurannya, dan tulis pembaruan secara atomik.
+- Validasi `qh.lock` versi 1 secara ketat: tolak versi/field yang tidak dikenal, entri paket duplikat, metadata malformed, dan digest SHA-256 yang tidak valid; serialisasi string TOML dengan escaping agar path tidak dapat menyisipkan tabel lock baru.
+- Perbaiki kesetaraan opcode QVM1 pada source bootstrap Qich agar boolean tidak dianggap sama dengan integer, selaras dengan semantik `q_eq` pada reference runtime; tambahkan differential regression cases untuk EQ/NE, int-float, string-number, dan nil-bool.
+- Eksekusi QVM one-shot sekarang memverifikasi snapshot immutable, bukan objek mutable milik caller, untuk menutup celah perubahan bytecode di antara validasi dan eksekusi; benchmark membedakan biaya snapshot+validasi dari prepared execution.
+- Tambahkan metode integer `bit_length()` pada reference runtime dan gunakan pada source bootstrap QVM1 agar batas integer 13.000 bit sama persis dengan verifier referensi; regression tests mencakup batas maksimum positif/negatif dan nilai pertama yang ditolak.
