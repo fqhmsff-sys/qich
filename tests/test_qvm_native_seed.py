@@ -76,10 +76,14 @@ class NativeQVMSeedTests(unittest.TestCase):
             result.returncode, 86,
             "native sanitizer reported a failure: %r" % result.stderr,
         )
-        for marker in ("AddressSanitizer", "LeakSanitizer", "runtime error:"):
+        diagnostics = (result.stderr or "") + "\\n" + (result.stdout or "")
+        for marker in (
+            "AddressSanitizer", "LeakSanitizer",
+            "UndefinedBehaviorSanitizer", "runtime error:",
+        ):
             self.assertNotIn(
-                marker, result.stderr or "",
-                "native sanitizer diagnostic detected: %r" % result.stderr,
+                marker, diagnostics,
+                "native sanitizer diagnostic detected: %r" % diagnostics,
             )
 
     def run_bytes(self, data, *, path=None, timeout=None):
