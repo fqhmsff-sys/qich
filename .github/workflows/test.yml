@@ -35,6 +35,28 @@ jobs:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -p '${{ matrix.suite }}'
 
+  native-sanitizers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Install native bootstrap seed build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev libjson-c-dev
+      - name: Run native seed suite with AddressSanitizer and UndefinedBehaviorSanitizer
+        env:
+          PYTHONPATH: src
+          QICH_NATIVE_SANITIZERS: address,undefined
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1:exitcode=86
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1:exitcode=86
+        run: python -m unittest discover -s tests -p 'test_qvm_native_seed.py'
+
   qich-language-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 10

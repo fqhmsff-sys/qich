@@ -36,14 +36,51 @@ class NativeQVMSeedTests(unittest.TestCase):
         cls.temp = tempfile.TemporaryDirectory(prefix="qich-qvm-seed-")
         cls.binary = Path(cls.temp.name) / "qvm1-seed"
         source = ROOT / "bootstrap" / "native" / "qvm1_seed.c"
-        subprocess.run([
-            compiler, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-pedantic",
+        compile_args = [
+            compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
+        ]
+        sanitizers = os.environ.get("QICH_NATIVE_SANITIZERS", "").strip()
+        if sanitizers:
+            requested = sanitizers.split(",")
+            allowed = {"address", "undefined"}
+            if (
+                not requested
+                or len(requested) != len(set(requested))
+                or set(requested) - allowed
+            ):
+                raise RuntimeError("QICH_NATIVE_SANITIZERS hanya menerima address,undefined")
+            compile_args.extend([
+                "-O1", "-g", "-fno-omit-frame-pointer",
+                "-fsanitize=" + ",".join(requested),
+                "-fno-sanitize-recover=all",
+            ])
+        else:
+            compile_args.append("-O2")
+        compile_args.extend([
             str(source), "-lcrypto", "-ljson-c", "-o", str(cls.binary),
-        ], check=True, capture_output=True, text=True)
+        ])
+        subprocess.run(compile_args, check=True, capture_output=True, text=True)
 
     @classmethod
     def tearDownClass(cls):
         cls.temp.cleanup()
+
+    def assert_no_sanitizer_diagnostics(self, result):
+        if not os.environ.get("QICH_NATIVE_SANITIZERS"):
+            return
+        self.assertGreaterEqual(
+            result.returncode, 0,
+            "native seed terminated by signal under sanitizers: %r" % result.stderr,
+        )
+        self.assertNotEqual(
+            result.returncode, 86,
+            "native sanitizer reported a failure: %r" % result.stderr,
+        )
+        for marker in ("AddressSanitizer", "LeakSanitizer", "runtime error:"):
+            self.assertNotIn(
+                marker, result.stderr or "",
+                "native sanitizer diagnostic detected: %r" % result.stderr,
+            )
 
     def run_bytes(self, data, *, path=None, timeout=None):
         if path is None:
@@ -56,10 +93,19 @@ class NativeQVMSeedTests(unittest.TestCase):
                 if not handle.closed:
                     handle.close()
             try:
-                return subprocess.run([str(self.binary), str(path)], capture_output=True, text=True, timeout=timeout)
+                result = subprocess.run(
+                    [str(self.binary), str(path)],
+                    capture_output=True, text=True, timeout=timeout,
+                )
             finally:
                 path.unlink(missing_ok=True)
-        return subprocess.run([str(self.binary), str(path)], capture_output=True, text=True, timeout=timeout)
+        else:
+            result = subprocess.run(
+                [str(self.binary), str(path)],
+                capture_output=True, text=True, timeout=timeout,
+            )
+        self.assert_no_sanitizer_diagnostics(result)
+        return result
 
     def run_program(self, program):
         return self.run_bytes(encode(program))
@@ -299,6 +345,7 @@ class NativeQVMSeedTests(unittest.TestCase):
                 text=True,
                 timeout=2,
             )
+            self.assert_no_sanitizer_diagnostics(result)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("file tidak valid", result.stderr)
         finally:

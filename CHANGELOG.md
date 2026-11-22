@@ -10,6 +10,8 @@ Perubahan penting untuk pengguna Qich dicatat di sini.
 
 ## Unreleased
 
+- Tambahkan job CI Linux dengan AddressSanitizer dan UndefinedBehaviorSanitizer untuk native QVM1 seed; compiler flag sanitizer dibatasi whitelist, dan harness memeriksa diagnostik serta terminasi signal agar kegagalan sanitizer tidak salah dihitung sebagai penolakan payload malformed yang diharapkan.
+
 - Perluas pengujian native QVM1 dengan regression cases untuk embedded NUL pada string serta 64 deterministic malformed-payload fuzz smoke cases (checksum dihitung ulang dan setiap proses diberi timeout); perbarui jumlah differential cases yang terdokumentasi dari 23 menjadi 31.
 
 - Perluas native QVM1 seed agar membaca dan mencetak string constant serta menjalankan equality dan ordering comparison string; normalisasi escape Unicode JSON-C ke UTF-8 kanonis QVM1, validasi UTF-8 mentah secara ketat dan escape non-ASCII sebelum parsing json-c, uji pasangan surrogate, penolakan surrogate tak berpasangan/UTF-8 invalid, pertahankan teks literal yang menyerupai escape, dan bersihkan diagnostik sementara setelah conformance tests lulus. String arithmetic, float, dan `DIV` tetap di luar subset native saat ini.
