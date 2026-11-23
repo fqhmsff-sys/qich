@@ -268,6 +268,23 @@ class NativeQVMSeedTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "0\n")
 
+    def test_signed_int64_overflow_edges_fail_closed(self):
+        minimum = -(2**63)
+        maximum = 2**63 - 1
+        cases = [
+            ("ADD-positive-overflow", [maximum, 1], [["CONST", 0], ["CONST", 1], ["ADD"], ["HALT"]]),
+            ("ADD-negative-overflow", [minimum, -1], [["CONST", 0], ["CONST", 1], ["ADD"], ["HALT"]]),
+            ("SUB-negative-overflow", [minimum, 1], [["CONST", 0], ["CONST", 1], ["SUB"], ["HALT"]]),
+            ("SUB-positive-overflow", [maximum, -1], [["CONST", 0], ["CONST", 1], ["SUB"], ["HALT"]]),
+            ("MUL-minimum-by-negative-one", [minimum, -1], [["CONST", 0], ["CONST", 1], ["MUL"], ["HALT"]]),
+            ("NEG-minimum", [minimum], [["CONST", 0], ["NEG"], ["HALT"]]),
+            ("MOD-by-zero", [1, 0], [["CONST", 0], ["CONST", 1], ["MOD"], ["HALT"]]),
+        ]
+        for label, constants, code in cases:
+            with self.subTest(edge=label):
+                program = {"constants": constants, "code": code}
+                self.assertNotEqual(self.run_program(program).returncode, 0)
+
 
     def test_embedded_nul_string_matches_reference(self):
         cases = [
