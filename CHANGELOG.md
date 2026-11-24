@@ -10,6 +10,8 @@ Perubahan penting untuk pengguna Qich dicatat di sini.
 
 ## Unreleased
 
+- Pada POSIX, ekstraksi ZIP kini menelusuri direktori dengan `dir_fd` + `O_NOFOLLOW`, membuat file sementara dan melakukan rename relatif terhadap parent descriptor yang dipatok; regression test mengganti ancestor menjadi symlink tepat sebelum rename dan memastikan ekstraksi tidak dialihkan ke luar direktori yang dibuka. Platform tanpa primitive ini masih memakai fallback berbasis path.
+
 - Tambahkan job CI Linux dengan AddressSanitizer dan UndefinedBehaviorSanitizer untuk native QVM1 seed; compiler flag sanitizer dibatasi whitelist, dan harness memeriksa diagnostik serta terminasi signal agar kegagalan sanitizer tidak salah dihitung sebagai penolakan payload malformed yang diharapkan.
 
 - Perluas pengujian native QVM1 dengan regression cases untuk embedded NUL pada string serta 64 deterministic malformed-payload fuzz smoke cases (checksum dihitung ulang dan setiap proses diberi timeout); perbarui jumlah differential cases yang terdokumentasi dari 23 menjadi 31.

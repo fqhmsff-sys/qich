@@ -2,6 +2,7 @@
 import io
 import os
 import re
+import secrets
 import stat
 import tempfile
 import unicodedata
@@ -86,6 +87,151 @@ def _within_directory(base, path):
         return False
 
 
+
+def _supports_descriptor_extraction():
+    required = (os.open, os.mkdir, os.stat, os.unlink)
+    return (
+        os.name == "posix"
+        and hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "O_DIRECTORY")
+        and all(function in os.supports_dir_fd for function in required)
+    )
+
+
+def _open_directory_at(parent_fd, name, create):
+    """Open one child directory without following a symlink or path ancestor."""
+    flags = (
+        os.O_RDONLY
+        | os.O_DIRECTORY
+        | os.O_NOFOLLOW
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    try:
+        before = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        if not create:
+            raise
+        try:
+            os.mkdir(name, 0o755, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+        before = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+
+    if not stat.S_ISDIR(before.st_mode):
+        raise ValueError("komponen tujuan ekstraksi bukan direktori nyata")
+
+    fd = os.open(name, flags, dir_fd=parent_fd)
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISDIR(opened.st_mode) or not os.path.samestat(before, opened):
+            raise ValueError("direktori tujuan berubah saat dibuka")
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _open_absolute_directory(path):
+    """Walk a resolved absolute path one no-follow directory descriptor at a time."""
+    path = os.path.realpath(os.path.abspath(path))
+    flags = (
+        os.O_RDONLY
+        | os.O_DIRECTORY
+        | os.O_NOFOLLOW
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    fd = os.open(os.sep, flags)
+    try:
+        for component in path.split(os.sep):
+            if not component:
+                continue
+            child_fd = _open_directory_at(fd, component, True)
+            os.close(fd)
+            fd = child_fd
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _open_destination_directory(destination):
+    destination = os.path.abspath(destination)
+    parent = os.path.dirname(destination) or os.sep
+    leaf = os.path.basename(destination)
+    parent_fd = _open_absolute_directory(parent)
+    try:
+        if not leaf:
+            return os.dup(parent_fd)
+        return _open_directory_at(parent_fd, leaf, True)
+    finally:
+        os.close(parent_fd)
+
+
+def _extract_zip_descriptor(zf, validated, destination, max_total):
+    """Extract relative to pinned directory descriptors on POSIX."""
+    root_fd = None
+    try:
+        root_fd = _open_destination_directory(destination)
+        actual_total = 0
+        for zi, member, is_dir in validated:
+            parts = member.split("/")
+            parent_fd = os.dup(root_fd)
+            try:
+                for component in parts[:-1]:
+                    child_fd = _open_directory_at(parent_fd, component, True)
+                    os.close(parent_fd)
+                    parent_fd = child_fd
+
+                leaf = parts[-1]
+                if is_dir:
+                    child_fd = _open_directory_at(parent_fd, leaf, True)
+                    os.close(child_fd)
+                    continue
+
+                temporary = ".qich-extract-" + secrets.token_hex(16) + ".tmp"
+                flags = (
+                    os.O_WRONLY
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | os.O_NOFOLLOW
+                    | getattr(os, "O_CLOEXEC", 0)
+                )
+                fd = os.open(temporary, flags, 0o600, dir_fd=parent_fd)
+                try:
+                    with os.fdopen(fd, "wb") as output:
+                        with zf.open(zi, "r") as source:
+                            while True:
+                                chunk = source.read(64 * 1024)
+                                if not chunk:
+                                    break
+                                actual_total += len(chunk)
+                                if actual_total > max_total:
+                                    raise ValueError("ukuran hasil ekstraksi melampaui batas")
+                                output.write(chunk)
+                        output.flush()
+                        os.fsync(output.fileno())
+                    # Rename is relative to the already-open parent. Replacing an
+                    # ancestor path with a symlink cannot redirect this operation.
+                    os.rename(
+                        temporary,
+                        leaf,
+                        src_dir_fd=parent_fd,
+                        dst_dir_fd=parent_fd,
+                    )
+                finally:
+                    try:
+                        os.unlink(temporary, dir_fd=parent_fd)
+                    except FileNotFoundError:
+                        pass
+            finally:
+                os.close(parent_fd)
+    except OSError as exc:
+        raise ValueError("ekstraksi ZIP gagal pada direktori yang dipatok dengan descriptor") from exc
+    finally:
+        if root_fd is not None:
+            os.close(root_fd)
+
+
 def safe_extract_zip(data: bytes, dest: str, max_files=2000, max_total=100 * 1024 * 1024):
     """Ekstraksi ZIP dengan path portable, collision checks, dan I/O berbatas."""
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
@@ -95,16 +241,6 @@ def safe_extract_zip(data: bytes, dest: str, max_files=2000, max_total=100 * 102
 
         total = 0
         destination = os.path.abspath(os.fspath(dest))
-        try:
-            destination_info = os.lstat(destination)
-        except FileNotFoundError:
-            os.makedirs(destination, exist_ok=True)
-            destination_info = os.lstat(destination)
-        except OSError as exc:
-            raise ValueError("direktori tujuan ekstraksi tidak dapat diperiksa") from exc
-        if not stat.S_ISDIR(destination_info.st_mode):
-            raise ValueError("tujuan ekstraksi harus berupa direktori nyata, bukan symlink atau file")
-        base = os.path.realpath(destination)
         validated = []
         seen = {}
 
@@ -136,6 +272,22 @@ def safe_extract_zip(data: bytes, dest: str, max_files=2000, max_total=100 * 102
                 raise ValueError("arsip terlalu besar setelah diekstrak")
             seen[key] = is_dir
             validated.append((zi, member, is_dir))
+
+        if _supports_descriptor_extraction():
+            _extract_zip_descriptor(zf, validated, destination, max_total)
+            return
+
+        # Path-based fallback for platforms without dir_fd/O_NOFOLLOW support.
+        try:
+            destination_info = os.lstat(destination)
+        except FileNotFoundError:
+            os.makedirs(destination, exist_ok=True)
+            destination_info = os.lstat(destination)
+        except OSError as exc:
+            raise ValueError("direktori tujuan ekstraksi tidak dapat diperiksa") from exc
+        if not stat.S_ISDIR(destination_info.st_mode):
+            raise ValueError("tujuan ekstraksi harus berupa direktori nyata, bukan symlink atau file")
+        base = os.path.realpath(destination)
 
         actual_total = 0
         for zi, member, is_dir in validated:

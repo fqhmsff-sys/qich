@@ -1,9 +1,10 @@
-import hashlib, json, os, shutil, tempfile, unittest
+import hashlib, io, json, os, shutil, tempfile, unittest, zipfile
 from unittest import mock
 from helpers import qh, ROOT
 from qich.package import lock, registry
 from qich.package.resolver import ensure_deps
 from qich.compiler.diagnostics import QichError
+from qich.security import safe_extract_zip
 
 
 def w(path, text):
@@ -588,6 +589,47 @@ class Packages(unittest.TestCase):
             lock.read(app)
         self.assertEqual(caught.exception.kind, "ManifestError")
 
+
+
+    @unittest.skipUnless(
+        os.name == "posix"
+        and hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "O_DIRECTORY")
+        and all(function in os.supports_dir_fd for function in (os.open, os.mkdir, os.stat, os.unlink)),
+        "directory-descriptor extraction is POSIX-specific",
+    )
+    def test_zip_extraction_stays_in_pinned_parent_after_ancestor_swap(self):
+        destination = os.path.join(self.t, "extract")
+        outside = os.path.join(self.t, "outside")
+        moved = os.path.join(self.t, "nested-original")
+        os.mkdir(outside)
+
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w", compression=zipfile.ZIP_STORED) as archive:
+            archive.writestr("nested/payload.txt", b"kept inside the opened directory")
+
+        original_rename = os.rename
+        swapped = False
+
+        def swap_ancestor_before_relative_rename(src, dst, *args, **kwargs):
+            nonlocal swapped
+            if kwargs.get("src_dir_fd") is not None and not swapped:
+                nested = os.path.join(destination, "nested")
+                original_rename(nested, moved)
+                os.symlink(outside, nested)
+                swapped = True
+            return original_rename(src, dst, *args, **kwargs)
+
+        with mock.patch(
+            "qich.security.os.rename",
+            side_effect=swap_ancestor_before_relative_rename,
+        ):
+            safe_extract_zip(payload.getvalue(), destination)
+
+        self.assertTrue(swapped)
+        with open(os.path.join(moved, "payload.txt"), "rb") as stream:
+            self.assertEqual(stream.read(), b"kept inside the opened directory")
+        self.assertFalse(os.path.exists(os.path.join(outside, "payload.txt")))
 
 if __name__ == "__main__":
     unittest.main()
