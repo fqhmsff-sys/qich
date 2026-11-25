@@ -254,7 +254,7 @@ class Packages(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.reg, "expanded-1.0.0.qhpkg")))
         self.assertFalse(os.path.exists(os.path.join(self.reg, "index.json")))
 
-    def test_publish_rejects_file_swapped_to_symlink_after_lstat(self):
+    def test_publish_rejects_file_swapped_to_symlink_after_entry_stat(self):
         lib = os.path.join(self.t, "race"); mkpkg(lib, "race", "1.0.0", "fn f() rtrn => 1\n")
         target = os.path.join(lib, "src", "race.bin")
         outside = os.path.join(self.t, "outside.bin")
@@ -262,19 +262,23 @@ class Packages(unittest.TestCase):
             stream.write(b"inside")
         with open(outside, "wb") as stream:
             stream.write(b"outside-secret")
-        original_lstat = os.lstat
+        original_stat = registry._stat_package_entry
         swapped = False
 
-        def lstat_then_swap(path, *args, **kwargs):
+        def stat_then_swap(path, *, dir_fd=None):
             nonlocal swapped
-            info = original_lstat(path, *args, **kwargs)
-            if os.path.abspath(os.fspath(path)) == os.path.abspath(target) and not swapped:
+            info = original_stat(path, dir_fd=dir_fd)
+            candidate = os.path.abspath(os.fspath(path)) if dir_fd is None else os.fspath(path)
+            if not swapped and (
+                candidate == os.path.abspath(target)
+                or (candidate == "race.bin" and dir_fd is not None)
+            ):
                 swapped = True
                 os.unlink(target)
                 os.symlink(outside, target)
             return info
 
-        with mock.patch("qich.package.registry.os.lstat", side_effect=lstat_then_swap):
+        with mock.patch("qich.package.registry._stat_package_entry", side_effect=stat_then_swap):
             with self.assertRaises(QichError) as caught:
                 registry.publish(lib, "race", "1.0.0", self.reg)
         self.assertTrue(swapped)
@@ -586,20 +590,20 @@ class Packages(unittest.TestCase):
         original_open = os.open
         swapped = False
 
-        def swap_ancestor_before_open(path, flags, *args, **kwargs):
+        def swap_ancestor_before_open(path, flags, *, dir_fd=None):
             nonlocal swapped
             candidate = os.fspath(path)
             if not swapped and (
                 candidate == source_path
-                or (candidate == "payload.qh" and kwargs.get("dir_fd") is not None)
+                or (candidate == "payload.qh" and dir_fd is not None)
             ):
                 os.rename(nested, moved)
                 os.symlink(outside, nested, target_is_directory=True)
                 swapped = True
-            return original_open(path, flags, *args, **kwargs)
+            return original_open(path, flags, dir_fd=dir_fd)
 
         with mock.patch(
-            "qich.package.registry.os.open",
+            "qich.package.registry._open_package_file",
             side_effect=swap_ancestor_before_open,
         ):
             registry.publish(lib, "publishpinned", "1.0.0", self.reg)

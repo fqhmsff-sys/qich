@@ -10,7 +10,7 @@ Perubahan penting untuk pengguna Qich dicatat di sini.
 
 ## Unreleased
 
-- Pada POSIX, publikasi paket kini memakai `os.fwalk` dan file descriptor direktori yang dipatok untuk memeriksa serta membuka file sumber relatif terhadap direktori induknya; regression test mengganti ancestor menjadi symlink tepat sebelum file dibuka. Fallback non-POSIX tetap path-based, dan operasi penulisan ke direktori registry masih memerlukan hardening descriptor-relative terpisah.
+- Pada POSIX, publikasi paket kini memakai `os.fwalk` dan file descriptor direktori yang dipatok untuk memeriksa serta membuka file sumber relatif terhadap direktori induknya; regression test mengganti ancestor menjadi symlink tepat sebelum file dibuka. Fallback non-POSIX tetap path-based, dan operasi penulisan ke direktori registry masih memerlukan hardening descriptor-relative terpisah. Test race kini mem-patch helper I/O yang eksplisit agar pemeriksaan kapabilitas descriptor tidak ikut terpengaruh oleh mock.
 
 - Pada POSIX, ekstraksi ZIP kini menelusuri direktori dengan `dir_fd` + `O_NOFOLLOW`, membuat file sementara dan melakukan rename relatif terhadap parent descriptor yang dipatok; regression test mengganti ancestor menjadi symlink tepat sebelum rename dan memastikan ekstraksi tidak dialihkan ke luar direktori yang dibuka. Platform tanpa primitive ini masih memakai fallback berbasis path.
 

@@ -217,6 +217,19 @@ def _open_existing_directory_chain(path):
         raise
 
 
+
+def _stat_package_entry(name, *, dir_fd=None):
+    if dir_fd is None:
+        return os.lstat(name)
+    return os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+
+
+def _open_package_file(name, flags, *, dir_fd=None):
+    if dir_fd is None:
+        return os.open(name, flags)
+    return os.open(name, flags, dir_fd=dir_fd)
+
+
 def _iter_package_files(package_root):
     """Yield (archive name, opened stat, stream) without path-based ancestor races."""
     if _supports_descriptor_publish():
@@ -238,7 +251,7 @@ def _iter_package_files(package_root):
             ):
                 dirs[:] = sorted(name for name in dirs if name not in SKIP)
                 for dirname in dirs:
-                    info = os.stat(dirname, dir_fd=directory_fd, follow_symlinks=False)
+                    info = _stat_package_entry(dirname, dir_fd=directory_fd)
                     if not stat.S_ISDIR(info.st_mode):
                         raise QichError(
                             "symlink atau tipe direktori khusus tidak diizinkan dalam paket",
@@ -249,7 +262,7 @@ def _iter_package_files(package_root):
                 for filename in sorted(files):
                     if filename in SKIP:
                         continue
-                    info = os.stat(filename, dir_fd=directory_fd, follow_symlinks=False)
+                    info = _stat_package_entry(filename, dir_fd=directory_fd)
                     if not stat.S_ISREG(info.st_mode):
                         raise QichError(
                             "symlink atau file khusus tidak diizinkan dalam paket",
@@ -257,7 +270,7 @@ def _iter_package_files(package_root):
                             "P0131",
                         )
 
-                    source_fd = os.open(filename, flags, dir_fd=directory_fd)
+                    source_fd = _open_package_file(filename, flags, dir_fd=directory_fd)
                     try:
                         opened = os.fstat(source_fd)
                         if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(info, opened):
@@ -269,10 +282,7 @@ def _iter_package_files(package_root):
                         source_stream = os.fdopen(source_fd, "rb")
                         source_fd = None
                         relative = filename if base in (".", "") else os.path.join(base, filename)
-                        try:
-                            yield os.path.relpath(relative, ".").replace(os.sep, "/"), opened, source_stream
-                        finally:
-                            source_stream.close()
+                        yield os.path.relpath(relative, ".").replace(os.sep, "/"), opened, source_stream
                     finally:
                         if source_fd is not None:
                             os.close(source_fd)
@@ -305,7 +315,7 @@ def _iter_package_files(package_root):
         for dirname in dirs:
             path = os.path.join(base, dirname)
             try:
-                mode = os.lstat(path).st_mode
+                mode = _stat_package_entry(path).st_mode
             except OSError as exc:
                 raise QichError(
                     "direktori paket berubah saat dipublikasikan",
@@ -324,7 +334,7 @@ def _iter_package_files(package_root):
                 continue
             path = os.path.join(base, filename)
             try:
-                info = os.lstat(path)
+                info = _stat_package_entry(path)
             except OSError as exc:
                 raise QichError(
                     "file paket berubah saat dipublikasikan",
@@ -338,7 +348,7 @@ def _iter_package_files(package_root):
                     "P0131",
                 )
             try:
-                source_fd = os.open(path, flags)
+                source_fd = _open_package_file(path, flags)
             except OSError as exc:
                 raise QichError(
                     "file paket berubah atau tidak dapat dibuka tanpa mengikuti symlink",
@@ -363,10 +373,7 @@ def _iter_package_files(package_root):
                         )
                 source_stream = os.fdopen(source_fd, "rb")
                 source_fd = None
-                try:
-                    yield os.path.relpath(path, package_root).replace(os.sep, "/"), opened, source_stream
-                finally:
-                    source_stream.close()
+                yield os.path.relpath(path, package_root).replace(os.sep, "/"), opened, source_stream
             finally:
                 if source_fd is not None:
                     os.close(source_fd)
