@@ -10,6 +10,8 @@ Perubahan penting untuk pengguna Qich dicatat di sini.
 
 ## Unreleased
 
+- Pada POSIX, publikasi paket kini memakai `os.fwalk` dan file descriptor direktori yang dipatok untuk memeriksa serta membuka file sumber relatif terhadap direktori induknya; regression test mengganti ancestor menjadi symlink tepat sebelum file dibuka. Fallback non-POSIX tetap path-based, dan operasi penulisan ke direktori registry masih memerlukan hardening descriptor-relative terpisah.
+
 - Pada POSIX, ekstraksi ZIP kini menelusuri direktori dengan `dir_fd` + `O_NOFOLLOW`, membuat file sementara dan melakukan rename relatif terhadap parent descriptor yang dipatok; regression test mengganti ancestor menjadi symlink tepat sebelum rename dan memastikan ekstraksi tidak dialihkan ke luar direktori yang dibuka. Platform tanpa primitive ini masih memakai fallback berbasis path.
 
 - Tambahkan job CI Linux dengan AddressSanitizer dan UndefinedBehaviorSanitizer untuk native QVM1 seed; compiler flag sanitizer dibatasi whitelist, dan harness memeriksa diagnostik serta terminasi signal agar kegagalan sanitizer tidak salah dihitung sebagai penolakan payload malformed yang diharapkan.

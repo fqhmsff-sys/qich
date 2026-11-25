@@ -163,9 +163,217 @@ def _publish_walk_error(exc):
     ) from exc
 
 
-def _write_package_archive(pkg_dir, registry_dir, archive_path):
-    """Build a bounded ZIP from verified file descriptors, then publish exclusively."""
 
+def _supports_descriptor_publish():
+    required = (os.open, os.stat)
+    return (
+        os.name == "posix"
+        and hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "O_DIRECTORY")
+        and hasattr(os, "fwalk")
+        and all(function in os.supports_dir_fd for function in required)
+        and os.stat in getattr(os, "supports_follow_symlinks", set())
+    )
+
+
+def _open_existing_directory_chain(path):
+    """Pin an existing absolute directory without following any path component."""
+    resolved = os.path.realpath(os.path.abspath(path))
+    flags = (
+        os.O_RDONLY
+        | os.O_DIRECTORY
+        | os.O_NOFOLLOW
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    fd = os.open(os.sep, flags)
+    try:
+        for component in resolved.split(os.sep):
+            if not component:
+                continue
+            before = os.stat(component, dir_fd=fd, follow_symlinks=False)
+            if not stat.S_ISDIR(before.st_mode):
+                raise QichError(
+                    "komponen direktori paket berubah atau bukan direktori nyata",
+                    "SecurityError",
+                    "P0131",
+                )
+            child_fd = os.open(component, flags, dir_fd=fd)
+            try:
+                opened = os.fstat(child_fd)
+                if not stat.S_ISDIR(opened.st_mode) or not os.path.samestat(before, opened):
+                    raise QichError(
+                        "komponen direktori paket berubah saat dibuka",
+                        "SecurityError",
+                        "P0131",
+                    )
+            except BaseException:
+                os.close(child_fd)
+                raise
+            os.close(fd)
+            fd = child_fd
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _iter_package_files(package_root):
+    """Yield (archive name, opened stat, stream) without path-based ancestor races."""
+    if _supports_descriptor_publish():
+        root_fd = None
+        try:
+            root_fd = _open_existing_directory_chain(package_root)
+            flags = (
+                os.O_RDONLY
+                | os.O_NOFOLLOW
+                | getattr(os, "O_NONBLOCK", 0)
+                | getattr(os, "O_CLOEXEC", 0)
+            )
+            for base, dirs, files, directory_fd in os.fwalk(
+                ".",
+                topdown=True,
+                onerror=_publish_walk_error,
+                follow_symlinks=False,
+                dir_fd=root_fd,
+            ):
+                dirs[:] = sorted(name for name in dirs if name not in SKIP)
+                for dirname in dirs:
+                    info = os.stat(dirname, dir_fd=directory_fd, follow_symlinks=False)
+                    if not stat.S_ISDIR(info.st_mode):
+                        raise QichError(
+                            "symlink atau tipe direktori khusus tidak diizinkan dalam paket",
+                            "SecurityError",
+                            "P0131",
+                        )
+
+                for filename in sorted(files):
+                    if filename in SKIP:
+                        continue
+                    info = os.stat(filename, dir_fd=directory_fd, follow_symlinks=False)
+                    if not stat.S_ISREG(info.st_mode):
+                        raise QichError(
+                            "symlink atau file khusus tidak diizinkan dalam paket",
+                            "SecurityError",
+                            "P0131",
+                        )
+
+                    source_fd = os.open(filename, flags, dir_fd=directory_fd)
+                    try:
+                        opened = os.fstat(source_fd)
+                        if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(info, opened):
+                            raise QichError(
+                                "file paket berubah atau bukan file reguler",
+                                "SecurityError",
+                                "P0131",
+                            )
+                        source_stream = os.fdopen(source_fd, "rb")
+                        source_fd = None
+                        relative = filename if base in (".", "") else os.path.join(base, filename)
+                        try:
+                            yield os.path.relpath(relative, ".").replace(os.sep, "/"), opened, source_stream
+                        finally:
+                            source_stream.close()
+                    finally:
+                        if source_fd is not None:
+                            os.close(source_fd)
+        except QichError:
+            raise
+        except OSError as exc:
+            raise QichError(
+                "direktori atau file paket berubah saat dibuka secara descriptor-relative",
+                "SecurityError",
+                "P0131",
+            ) from exc
+        finally:
+            if root_fd is not None:
+                os.close(root_fd)
+        return
+
+    # Portable fallback: leaf symlinks are rejected, but ancestor traversal is
+    # path-based on platforms without the required descriptor-relative APIs.
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_BINARY", 0)
+        | nofollow
+        | getattr(os, "O_NONBLOCK", 0)
+    )
+    for base, dirs, files in os.walk(
+        package_root, followlinks=False, onerror=_publish_walk_error
+    ):
+        dirs[:] = sorted(name for name in dirs if name not in SKIP)
+        for dirname in dirs:
+            path = os.path.join(base, dirname)
+            try:
+                mode = os.lstat(path).st_mode
+            except OSError as exc:
+                raise QichError(
+                    "direktori paket berubah saat dipublikasikan",
+                    "RegistryError",
+                    "P0131",
+                ) from exc
+            if not stat.S_ISDIR(mode):
+                raise QichError(
+                    "symlink atau tipe direktori khusus tidak diizinkan dalam paket",
+                    "SecurityError",
+                    "P0131",
+                )
+
+        for filename in sorted(files):
+            if filename in SKIP:
+                continue
+            path = os.path.join(base, filename)
+            try:
+                info = os.lstat(path)
+            except OSError as exc:
+                raise QichError(
+                    "file paket berubah saat dipublikasikan",
+                    "RegistryError",
+                    "P0131",
+                ) from exc
+            if not stat.S_ISREG(info.st_mode):
+                raise QichError(
+                    "symlink atau file khusus tidak diizinkan dalam paket",
+                    "SecurityError",
+                    "P0131",
+                )
+            try:
+                source_fd = os.open(path, flags)
+            except OSError as exc:
+                raise QichError(
+                    "file paket berubah atau tidak dapat dibuka tanpa mengikuti symlink",
+                    "SecurityError",
+                    "P0131",
+                ) from exc
+            try:
+                opened = os.fstat(source_fd)
+                if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(info, opened):
+                    raise QichError(
+                        "file paket berubah atau bukan file reguler",
+                        "SecurityError",
+                        "P0131",
+                    )
+                if not nofollow:
+                    current = os.lstat(path)
+                    if stat.S_ISLNK(current.st_mode) or not os.path.samestat(current, opened):
+                        raise QichError(
+                            "file paket berubah menjadi symlink saat dibuka",
+                            "SecurityError",
+                            "P0131",
+                        )
+                source_stream = os.fdopen(source_fd, "rb")
+                source_fd = None
+                try:
+                    yield os.path.relpath(path, package_root).replace(os.sep, "/"), opened, source_stream
+                finally:
+                    source_stream.close()
+            finally:
+                if source_fd is not None:
+                    os.close(source_fd)
+
+
+def _write_package_archive(pkg_dir, registry_dir, archive_path):
+    """Build a bounded ZIP from descriptor-verified package files."""
     try:
         root_info = os.lstat(pkg_dir)
     except OSError as exc:
@@ -180,103 +388,29 @@ def _write_package_archive(pkg_dir, registry_dir, archive_path):
             writer = _BoundedWriter(raw, MAX_ARCHIVE_BYTES)
             total_uncompressed = 0
             with zipfile.ZipFile(writer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-                for base, dirs, files in os.walk(package_root, followlinks=False, onerror=_publish_walk_error):
-                    dirs[:] = sorted(name for name in dirs if name not in SKIP)
-                    for dirname in dirs:
-                        path = os.path.join(base, dirname)
-                        try:
-                            mode = os.lstat(path).st_mode
-                        except OSError as exc:
-                            raise QichError("direktori paket berubah saat dipublikasikan", "RegistryError", "P0131") from exc
-                        if not stat.S_ISDIR(mode):
-                            raise QichError("symlink atau tipe direktori khusus tidak diizinkan dalam paket", "SecurityError", "P0131")
-
-                    for filename in sorted(files):
-                        if filename in SKIP:
-                            continue
-                        path = os.path.join(base, filename)
-                        try:
-                            info = os.lstat(path)
-                        except OSError as exc:
-                            raise QichError("file paket berubah saat dipublikasikan", "RegistryError", "P0131") from exc
-                        if not stat.S_ISREG(info.st_mode):
-                            raise QichError("symlink atau file khusus tidak diizinkan dalam paket", "SecurityError", "P0131")
-
-                        nofollow = getattr(os, "O_NOFOLLOW", 0)
-                        flags = (
-                            os.O_RDONLY
-                            | getattr(os, "O_BINARY", 0)
-                            | nofollow
-                            | getattr(os, "O_NONBLOCK", 0)
-                        )
-                        try:
-                            source_fd = os.open(path, flags)
-                        except OSError as exc:
-                            raise QichError(
-                                "file paket berubah atau tidak dapat dibuka tanpa mengikuti symlink",
-                                "SecurityError",
-                                "P0131",
-                            ) from exc
-
-                        try:
-                            try:
-                                opened = os.fstat(source_fd)
-                                if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(info, opened):
+                for arcname, opened, source_stream in _iter_package_files(package_root):
+                    with source_stream as source:
+                        zip_info = zipfile.ZipInfo(arcname)
+                        zip_info.compress_type = zipfile.ZIP_DEFLATED
+                        zip_info.create_system = 3
+                        zip_info.external_attr = (
+                            stat.S_IFREG | (opened.st_mode & 0o777)
+                        ) << 16
+                        file_bytes = 0
+                        with archive.open(zip_info, "w", force_zip64=True) as target:
+                            while True:
+                                chunk = source.read(64 * 1024)
+                                if not chunk:
+                                    break
+                                file_bytes += len(chunk)
+                                if total_uncompressed + file_bytes > MAX_PACKAGE_CONTENT_BYTES:
                                     raise QichError(
-                                        "file paket berubah atau bukan file reguler",
-                                        "SecurityError",
+                                        "konten paket melampaui batas ekstraksi 100 MiB",
+                                        "ResourceLimit",
                                         "P0131",
                                     )
-                                if not nofollow:
-                                    current = os.lstat(path)
-                                    if stat.S_ISLNK(current.st_mode) or not os.path.samestat(current, opened):
-                                        raise QichError(
-                                            "file paket berubah menjadi symlink saat dibuka",
-                                            "SecurityError",
-                                            "P0131",
-                                        )
-                            except OSError as exc:
-                                raise QichError(
-                                    "file paket berubah saat dibuka untuk publikasi",
-                                    "SecurityError",
-                                    "P0131",
-                                ) from exc
-
-                            if opened.st_size < 0 or total_uncompressed + opened.st_size > MAX_PACKAGE_CONTENT_BYTES:
-                                raise QichError(
-                                    "konten paket melampaui batas ekstraksi 100 MiB",
-                                    "ResourceLimit",
-                                    "P0131",
-                                )
-
-                            source_stream = os.fdopen(source_fd, "rb")
-                            source_fd = None
-                            arcname = os.path.relpath(path, package_root).replace(os.sep, "/")
-                            zip_info = zipfile.ZipInfo(arcname)
-                            zip_info.compress_type = zipfile.ZIP_DEFLATED
-                            zip_info.create_system = 3
-                            zip_info.external_attr = (
-                                stat.S_IFREG | (opened.st_mode & 0o777)
-                            ) << 16
-                            file_bytes = 0
-                            with source_stream as source:
-                                with archive.open(zip_info, "w", force_zip64=True) as target:
-                                    while True:
-                                        chunk = source.read(64 * 1024)
-                                        if not chunk:
-                                            break
-                                        file_bytes += len(chunk)
-                                        if total_uncompressed + file_bytes > MAX_PACKAGE_CONTENT_BYTES:
-                                            raise QichError(
-                                                "konten paket melampaui batas ekstraksi 100 MiB",
-                                                "ResourceLimit",
-                                                "P0131",
-                                            )
-                                        target.write(chunk)
-                            total_uncompressed += file_bytes
-                        finally:
-                            if source_fd is not None:
-                                os.close(source_fd)
+                                target.write(chunk)
+                        total_uncompressed += file_bytes
 
             raw.flush()
             os.fsync(raw.fileno())
@@ -315,7 +449,6 @@ def _write_package_archive(pkg_dir, registry_dir, archive_path):
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
-
 
 def load_index(reg):
     raw = _read_bounded_regular(index_path(reg), MAX_INDEX_BYTES, "index registry", "P0100", "P0101")

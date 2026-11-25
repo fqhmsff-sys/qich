@@ -562,6 +562,53 @@ class Packages(unittest.TestCase):
                 lock.pkg_hash(lib)
         self.assertEqual(caught.exception.kind, "SecurityError")
 
+
+    @unittest.skipUnless(
+        registry._supports_descriptor_publish(),
+        "descriptor-relative package traversal is POSIX-specific",
+    )
+    def test_publish_reads_from_pinned_source_directory_after_ancestor_swap(self):
+        lib = os.path.join(self.t, "publish-pinned")
+        mkpkg(lib, "publishpinned", "1.0.0", "fn f() rtrn => 1\n")
+        nested = os.path.join(lib, "src", "nested")
+        outside = os.path.join(self.t, "outside")
+        moved = os.path.join(self.t, "nested-original")
+        os.makedirs(nested)
+        os.makedirs(outside)
+        original = b"content from the already-open directory"
+        redirected = b"content reached through the replacement symlink"
+        source_path = os.path.join(nested, "payload.qh")
+        with open(source_path, "wb") as stream:
+            stream.write(original)
+        with open(os.path.join(outside, "payload.qh"), "wb") as stream:
+            stream.write(redirected)
+
+        original_open = os.open
+        swapped = False
+
+        def swap_ancestor_before_open(path, flags, *args, **kwargs):
+            nonlocal swapped
+            candidate = os.fspath(path)
+            if not swapped and (
+                candidate == source_path
+                or (candidate == "payload.qh" and kwargs.get("dir_fd") is not None)
+            ):
+                os.rename(nested, moved)
+                os.symlink(outside, nested, target_is_directory=True)
+                swapped = True
+            return original_open(path, flags, *args, **kwargs)
+
+        with mock.patch(
+            "qich.package.registry.os.open",
+            side_effect=swap_ancestor_before_open,
+        ):
+            registry.publish(lib, "publishpinned", "1.0.0", self.reg)
+
+        self.assertTrue(swapped)
+        archive_path = os.path.join(self.reg, "publishpinned-1.0.0.qhpkg")
+        with zipfile.ZipFile(archive_path) as archive:
+            self.assertEqual(archive.read("src/nested/payload.qh"), original)
+
     def test_publish_fails_closed_on_directory_walk_error(self):
         os.makedirs(self.reg, exist_ok=True)
         lib = os.path.join(self.t, "publish-walk-denied")
