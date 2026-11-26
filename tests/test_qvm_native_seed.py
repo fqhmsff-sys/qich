@@ -139,10 +139,13 @@ class NativeQVMSeedTests(unittest.TestCase):
                 "code": [["CONST", 0], ["STORE_LOCAL", 12], ["LOAD_LOCAL", 12], ["HALT"]],
             }),
             ("ADD", {"constants": [-7, 5], "code": [["CONST", 0], ["CONST", 1], ["ADD"], ["HALT"]]}),
+            ("ADD-13000-bit", {"constants": [(1 << 12999) - 1, 1], "code": [["CONST", 0], ["CONST", 1], ["ADD"], ["HALT"]]}),
             ("SUB", {"constants": [-7, 5], "code": [["CONST", 0], ["CONST", 1], ["SUB"], ["HALT"]]}),
             ("MUL", {"constants": [-7, 5], "code": [["CONST", 0], ["CONST", 1], ["MUL"], ["HALT"]]}),
+            ("MUL-13000-bit", {"constants": [1 << 6500, 1 << 6499], "code": [["CONST", 0], ["CONST", 1], ["MUL"], ["HALT"]]}),
             ("MOD-positive-divisor", {"constants": [-5, 3], "code": [["CONST", 0], ["CONST", 1], ["MOD"], ["HALT"]]}),
             ("MOD-negative-divisor", {"constants": [5, -3], "code": [["CONST", 0], ["CONST", 1], ["MOD"], ["HALT"]]}),
+            ("MOD-bigint-negative-divisor", {"constants": [-(1 << 12999) + 17, -((1 << 6500) + 3)], "code": [["CONST", 0], ["CONST", 1], ["MOD"], ["HALT"]]}),
             ("MOD-minimum-overflow-edge", {
                 "constants": [-(2**63), -1],
                 "code": [["CONST", 0], ["CONST", 1], ["MOD"], ["HALT"]],
@@ -161,6 +164,7 @@ class NativeQVMSeedTests(unittest.TestCase):
             ("LE", {"constants": [3, 3], "code": [["CONST", 0], ["CONST", 1], ["LE"], ["HALT"]]}),
             ("GT", {"constants": [4, 3], "code": [["CONST", 0], ["CONST", 1], ["GT"], ["HALT"]]}),
             ("GE", {"constants": [3, 3], "code": [["CONST", 0], ["CONST", 1], ["GE"], ["HALT"]]}),
+            ("CMP-bigint", {"constants": [1 << 12999, (1 << 12999) - 1], "code": [["CONST", 0], ["CONST", 1], ["GT"], ["HALT"]]}),
             ("NOT", {"constants": [False], "code": [["CONST", 0], ["NOT"], ["HALT"]]}),
             ("NEG", {"constants": [7], "code": [["CONST", 0], ["NEG"], ["HALT"]]}),
             ("JUMP", {"constants": [1, 9], "code": [["JUMP", 2], ["CONST", 0], ["CONST", 1], ["HALT"]]}),
@@ -204,11 +208,16 @@ class NativeQVMSeedTests(unittest.TestCase):
             {"constants": [1.5], "code": [["CONST", 0], ["HALT"]]},
             {"constants": [1, 2], "code": [["CONST", 0], ["CONST", 1], ["DIV"], ["HALT"]]},
             {"constants": ["left", "right"], "code": [["CONST", 0], ["CONST", 1], ["ADD"], ["HALT"]]},
-            {"constants": [2**63], "code": [["CONST", 0], ["HALT"]]},
         ]
         for program in programs:
             with self.subTest(program=program):
                 self.assertNotEqual(self.run_program(program).returncode, 0)
+
+        oversized = {"constants": [1 << 13000], "code": [["CONST", 0], ["HALT"]]}
+        body = json.dumps(
+            oversized, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        self.assertNotEqual(self.run_bytes(envelope(body)).returncode, 0)
 
     def test_string_constant_output_matches_reference(self):
         program = {"constants": ["Qich λ"], "code": [["CONST", 0], ["HALT"]]}
@@ -260,31 +269,61 @@ class NativeQVMSeedTests(unittest.TestCase):
         self.assertNotEqual(self.run_program(uninitialized).returncode, 0)
         self.assertNotEqual(self.run_program(infinite).returncode, 0)
 
-    def test_integer_overflow_is_rejected(self):
-        program = {"constants": [2**62, 4], "code": [["CONST", 0], ["CONST", 1], ["MUL"], ["HALT"]]}
-        self.assertNotEqual(self.run_program(program).returncode, 0)
-        minimum_modulo = {"constants": [-(2**63), -1], "code": [["CONST", 0], ["CONST", 1], ["MOD"], ["HALT"]]}
-        result = self.run_program(minimum_modulo)
+    def test_integer_arithmetic_exceeds_int64_and_matches_reference(self):
+        program = {
+            "constants": [2**62, 4],
+            "code": [["CONST", 0], ["CONST", 1], ["MUL"], ["HALT"]],
+        }
+        expected = render_value(execute_reference(program))
+        result = self.run_program(program)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "0\n")
+        self.assertEqual(result.stdout, expected + "\\n")
 
-    def test_signed_int64_overflow_edges_fail_closed(self):
-        minimum = -(2**63)
-        maximum = 2**63 - 1
+    def test_native_bigint_13000_bit_boundaries(self):
+        positive = 1 << 12999
+        negative = -positive
         cases = [
-            ("ADD-positive-overflow", [maximum, 1], [["CONST", 0], ["CONST", 1], ["ADD"], ["HALT"]]),
-            ("ADD-negative-overflow", [minimum, -1], [["CONST", 0], ["CONST", 1], ["ADD"], ["HALT"]]),
-            ("SUB-negative-overflow", [minimum, 1], [["CONST", 0], ["CONST", 1], ["SUB"], ["HALT"]]),
-            ("SUB-positive-overflow", [maximum, -1], [["CONST", 0], ["CONST", 1], ["SUB"], ["HALT"]]),
-            ("MUL-minimum-by-negative-one", [minimum, -1], [["CONST", 0], ["CONST", 1], ["MUL"], ["HALT"]]),
-            ("NEG-minimum", [minimum], [["CONST", 0], ["NEG"], ["HALT"]]),
-            ("MOD-by-zero", [1, 0], [["CONST", 0], ["CONST", 1], ["MOD"], ["HALT"]]),
+            {"constants": [positive], "code": [["CONST", 0], ["HALT"]]},
+            {"constants": [negative], "code": [["CONST", 0], ["HALT"]]},
+            {"constants": [positive], "code": [["CONST", 0], ["NEG"], ["HALT"]]},
+            {"constants": [(1 << 12999) - 1, 1],
+             "code": [["CONST", 0], ["CONST", 1], ["ADD"], ["HALT"]]},
         ]
-        for label, constants, code in cases:
-            with self.subTest(edge=label):
-                program = {"constants": constants, "code": code}
+        for program in cases:
+            with self.subTest(code=program["code"]):
+                expected = render_value(execute_reference(program))
+                result = self.run_program(program)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, expected + "\\n")
+
+        overflow_programs = [
+            {"constants": [positive, positive],
+             "code": [["CONST", 0], ["CONST", 1], ["ADD"], ["HALT"]]},
+            {"constants": [1 << 6500, 1 << 6500],
+             "code": [["CONST", 0], ["CONST", 1], ["MUL"], ["HALT"]]},
+        ]
+        for program in overflow_programs:
+            with self.subTest(overflow=program):
                 self.assertNotEqual(self.run_program(program).returncode, 0)
 
+    def test_native_bigint_modulo_matches_python_sign_rule(self):
+        cases = [(-5, 3), (5, -3), (-5, -3),
+                 (-(1 << 12999) + 7, -((1 << 6500) + 3))]
+        for left, right in cases:
+            program = {
+                "constants": [left, right],
+                "code": [["CONST", 0], ["CONST", 1], ["MOD"], ["HALT"]],
+            }
+            expected = render_value(execute_reference(program))
+            result = self.run_program(program)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, expected + "\\n")
+
+    def test_noncanonical_integer_constants_are_rejected(self):
+        for token in (b"-0", b"00"):
+            body = b'{"code":[["CONST",0],["HALT"]],"constants":[' + token + b"]}"
+            with self.subTest(token=token):
+                self.assertNotEqual(self.run_bytes(envelope(body)).returncode, 0)
 
     def test_embedded_nul_string_matches_reference(self):
         cases = [

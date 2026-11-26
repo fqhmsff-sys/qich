@@ -4,6 +4,7 @@
 #include <inttypes.h>
 #include <json-c/json.h>
 #include <limits.h>
+#include <openssl/bn.h>
 #include <openssl/sha.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -19,13 +20,17 @@
 #define MAX_STACK 65536u
 #define DEFAULT_MAX_STEPS 1000000u
 #define FILE_LIMIT (MAX_BYTECODE + 70u)
+#define MAX_INTEGER_BITS 13000u
+#define MAX_INTEGER_DIGITS 4000u
+#define MAX_BN_VALUES 100000u
+#define MAX_BN_BYTES (64u * 1024u * 1024u)
 
 typedef enum { V_NIL, V_BOOL, V_INT, V_STRING } ValueKind;
 typedef struct {
     ValueKind kind;
     union {
         bool boolean;
-        int64_t integer;
+        BIGNUM *integer;
         struct { char *data; size_t length; } string;
     } as;
 } Value;
@@ -37,6 +42,7 @@ typedef enum {
 } Op;
 typedef struct { Op op; int64_t operand; bool has_operand; } Instruction;
 typedef struct { Value *constants; size_t constant_count; Instruction *code; size_t code_count; } Program;
+typedef struct { BIGNUM **values; size_t count, capacity, bytes; } BNPool;
 
 static void free_program(Program *program) {
     if (!program) return;
@@ -55,6 +61,56 @@ static int fail(const char *message) {
     return 1;
 }
 
+
+static void bn_pool_free(BNPool *pool) {
+    if (!pool) return;
+    for (size_t i = 0; i < pool->count; i++) BN_clear_free(pool->values[i]);
+    free(pool->values);
+    memset(pool, 0, sizeof(*pool));
+}
+
+static bool bn_pool_adopt(BNPool *pool, BIGNUM *value) {
+    if (!pool || !value) { BN_clear_free(value); return false; }
+    size_t bits = (size_t)BN_num_bits(value);
+    size_t bytes = (bits + 7u) / 8u;
+    if (pool->count >= MAX_BN_VALUES || bytes > MAX_BN_BYTES - pool->bytes) {
+        BN_clear_free(value);
+        return false;
+    }
+    if (pool->count == pool->capacity) {
+        size_t next = pool->capacity ? pool->capacity * 2u : 32u;
+        if (next > MAX_BN_VALUES) next = MAX_BN_VALUES;
+        if (next <= pool->capacity || next > SIZE_MAX / sizeof(*pool->values)) {
+            BN_clear_free(value);
+            return false;
+        }
+        BIGNUM **grown = realloc(pool->values, next * sizeof(*pool->values));
+        if (!grown) { BN_clear_free(value); return false; }
+        pool->values = grown;
+        pool->capacity = next;
+    }
+    pool->values[pool->count++] = value;
+    pool->bytes += bytes;
+    return true;
+}
+
+static BIGNUM *bn_from_decimal(BNPool *pool, const unsigned char *text, size_t length) {
+    if (!text || !length || length > MAX_INTEGER_DIGITS || length > (size_t)INT_MAX)
+        return NULL;
+    char *decimal = malloc(length + 1u);
+    if (!decimal) return NULL;
+    memcpy(decimal, text, length);
+    decimal[length] = '\0';
+    BIGNUM *value = NULL;
+    int consumed = BN_dec2bn(&value, decimal);
+    free(decimal);
+    if (!value || consumed != (int)length || (unsigned)BN_num_bits(value) > MAX_INTEGER_BITS) {
+        BN_clear_free(value);
+        return NULL;
+    }
+    if (!bn_pool_adopt(pool, value)) return NULL;
+    return value;
+}
 static bool get_i64(struct json_object *value, int64_t *out) {
     if (!value || json_object_get_type(value) != json_type_int) return false;
     const char *text = json_object_to_json_string_ext(value, JSON_C_TO_STRING_PLAIN);
@@ -67,16 +123,28 @@ static bool get_i64(struct json_object *value, int64_t *out) {
     return true;
 }
 
-static bool get_value(struct json_object *item, Value *out) {
-    if (!item || json_object_get_type(item) == json_type_null) { out->kind = V_NIL; return true; }
+static bool get_value(struct json_object *item, Value *out, BIGNUM *integer) {
+    if (!item || json_object_get_type(item) == json_type_null) {
+        out->kind = V_NIL;
+        return true;
+    }
     enum json_type type = json_object_get_type(item);
-    if (type == json_type_boolean) { out->kind = V_BOOL; out->as.boolean = json_object_get_boolean(item) != 0; return true; }
-    if (type == json_type_int) { out->kind = V_INT; return get_i64(item, &out->as.integer); }
+    if (type == json_type_boolean) {
+        out->kind = V_BOOL;
+        out->as.boolean = json_object_get_boolean(item) != 0;
+        return true;
+    }
+    if (type == json_type_int) {
+        if (!integer) return false;
+        out->kind = V_INT;
+        out->as.integer = integer;
+        return true;
+    }
     if (type == json_type_string) {
         int length = json_object_get_string_len(item);
         const char *text = json_object_get_string(item);
         if (length < 0 || !text || (size_t)length > MAX_STRING) return false;
-        char *copy = malloc((size_t)length + 1);
+        char *copy = malloc((size_t)length + 1u);
         if (!copy) return false;
         memcpy(copy, text, (size_t)length);
         copy[(size_t)length] = '\0';
@@ -271,50 +339,206 @@ static bool json_escape_utf8(const unsigned char *data, size_t length,
     return true;
 }
 
-static bool parse_program(const unsigned char *body, size_t body_len, Program *program) {
+
+static bool json_value_end(const unsigned char *data, size_t length,
+                           size_t start, size_t *end) {
+    if (start >= length) return false;
+    if (data[start] == '"') {
+        size_t i = start + 1u;
+        while (i < length) {
+            unsigned char c = data[i++];
+            if (c == '\\') {
+                if (i >= length) return false;
+                i++;
+            } else if (c == '"') {
+                *end = i;
+                return true;
+            } else if (c < 0x20) {
+                return false;
+            }
+        }
+        return false;
+    }
+    if (data[start] == '[' || data[start] == '{') {
+        size_t depth = 0;
+        bool in_string = false, escaped = false;
+        for (size_t i = start; i < length; i++) {
+            unsigned char c = data[i];
+            if (in_string) {
+                if (escaped) escaped = false;
+                else if (c == '\\') escaped = true;
+                else if (c == '"') in_string = false;
+                else if (c < 0x20) return false;
+                continue;
+            }
+            if (c == '"') in_string = true;
+            else if (c == '[' || c == '{') depth++;
+            else if (c == ']' || c == '}') {
+                if (!depth) return false;
+                depth--;
+                if (!depth) { *end = i + 1u; return true; }
+            }
+        }
+        return false;
+    }
+    size_t i = start;
+    while (i < length && data[i] != ',' && data[i] != ']' && data[i] != '}') i++;
+    if (i == start) return false;
+    *end = i;
+    return true;
+}
+
+static bool canonical_integer_token(const unsigned char *text, size_t length) {
+    if (!text || !length) return false;
+    size_t i = 0;
+    bool negative = false;
+    if (text[i] == '-') { negative = true; i++; }
+    if (i >= length) return false;
+    if (text[i] == '0') return !negative && i + 1u == length;
+    if (text[i] < '1' || text[i] > '9') return false;
+    for (i++; i < length; i++)
+        if (text[i] < '0' || text[i] > '9') return false;
+    return true;
+}
+
+static size_t find_bytes(const unsigned char *data, size_t length,
+                         const unsigned char *needle, size_t needle_length) {
+    if (!needle_length || needle_length > length) return SIZE_MAX;
+    for (size_t i = 0; i <= length - needle_length; i++)
+        if (memcmp(data + i, needle, needle_length) == 0) return i;
+    return SIZE_MAX;
+}
+
+/* json-c stores integers in a machine-sized type. Replace only top-level
+   constant integer tokens with zero before parsing, retaining their exact
+   decimal values as bounded OpenSSL BIGNUMs. The canonical JSON comparison
+   then validates the rest of the document; integer lexical form is checked
+   here before normalization. */
+static bool normalize_integer_constants(const unsigned char *body, size_t length,
+                                        BNPool *pool, char **normalized,
+                                        size_t *normalized_length,
+                                        BIGNUM ***integer_constants) {
+    static const unsigned char marker[] = ",\"constants\":[";
+    const size_t marker_length = sizeof(marker) - 1u;
+    size_t marker_pos = find_bytes(body, length, marker, marker_length);
+    if (marker_pos == SIZE_MAX) return false;
+
+    char *copy = malloc(length + 1u);
+    BIGNUM **integers = calloc(MAX_ITEMS, sizeof(*integers));
+    if (!copy || !integers) { free(copy); free(integers); return false; }
+
+    size_t used = marker_pos + marker_length;
+    memcpy(copy, body, used);
+    size_t pos = used, index = 0;
+    bool first = true, closed = false;
+    while (pos < length) {
+        if (body[pos] == ']') {
+            copy[used++] = ']';
+            pos++;
+            closed = true;
+            break;
+        }
+        if (!first) {
+            if (body[pos] != ',') goto invalid;
+            copy[used++] = ',';
+            pos++;
+            if (pos >= length || body[pos] == ']') goto invalid;
+        }
+        size_t end = 0;
+        if (!json_value_end(body, length, pos, &end) || end <= pos) goto invalid;
+        size_t token_length = end - pos;
+        if (canonical_integer_token(body + pos, token_length)) {
+            if (index >= MAX_ITEMS) goto invalid;
+            BIGNUM *value = bn_from_decimal(pool, body + pos, token_length);
+            if (!value) goto invalid;
+            integers[index] = value;
+            copy[used++] = '0';
+        } else {
+            memcpy(copy + used, body + pos, token_length);
+            used += token_length;
+        }
+        index++;
+        pos = end;
+        first = false;
+        if (pos >= length || (body[pos] != ',' && body[pos] != ']')) goto invalid;
+    }
+    if (!closed) goto invalid;
+    memcpy(copy + used, body + pos, length - pos);
+    used += length - pos;
+    copy[used] = '\0';
+    *normalized = copy;
+    *normalized_length = used;
+    *integer_constants = integers;
+    return true;
+
+invalid:
+    free(copy);
+    free(integers);
+    return false;
+}
+
+static bool parse_program(const unsigned char *body, size_t body_len,
+                          Program *program, BNPool *pool) {
+    char *normalized_body = NULL;
+    size_t normalized_length = 0;
+    BIGNUM **integer_constants = NULL;
     char *escaped_body = NULL;
     size_t escaped_length = 0;
-    if (!json_escape_utf8(body, body_len, &escaped_body, &escaped_length)) return false;
-    struct json_tokener *tok = json_tokener_new_ex(32);
-    if (!tok) { free(escaped_body); return false; }
+    struct json_tokener *tok = NULL;
+    struct json_object *root = NULL;
+    bool ok = false;
+
+    if (!normalize_integer_constants(body, body_len, pool, &normalized_body,
+                                     &normalized_length, &integer_constants))
+        goto done;
+    if (!json_escape_utf8((const unsigned char *)normalized_body, normalized_length,
+                          &escaped_body, &escaped_length))
+        goto done;
+
+    tok = json_tokener_new_ex(32);
+    if (!tok) goto done;
     json_tokener_set_flags(tok, JSON_TOKENER_STRICT);
-    struct json_object *root = json_tokener_parse_ex(tok, escaped_body, (int)escaped_length);
+    root = json_tokener_parse_ex(tok, escaped_body, (int)escaped_length);
     bool parsed = root && json_tokener_get_error(tok) == json_tokener_success &&
                   json_tokener_get_parse_end(tok) == escaped_length;
     json_tokener_free(tok);
-    free(escaped_body);
-    if (!parsed) { if (root) json_object_put(root); return false; }
+    tok = NULL;
+    if (!parsed) goto done;
 
-    /* Canonical form also rejects duplicate keys and alternate encodings. */
     const char *canonical = json_object_to_json_string_ext(root, JSON_C_TO_STRING_PLAIN);
     char *canonical_utf8 = NULL;
     size_t canonical_length = 0;
-    bool normalized = canonical && canonical_json_utf8(canonical, &canonical_utf8, &canonical_length);
-    bool canonical_match = normalized && canonical_length == body_len &&
-                           memcmp(canonical_utf8, body, body_len) == 0;
+    bool normalized_ok = canonical &&
+        canonical_json_utf8(canonical, &canonical_utf8, &canonical_length);
+    bool canonical_match = normalized_ok &&
+        canonical_length == normalized_length &&
+        memcmp(canonical_utf8, normalized_body, normalized_length) == 0;
     free(canonical_utf8);
-    if (!canonical_match || json_object_get_type(root) != json_type_object || json_object_object_length(root) != 2) {
-        json_object_put(root); return false;
-    }
+    if (!canonical_match || json_object_get_type(root) != json_type_object ||
+        json_object_object_length(root) != 2)
+        goto done;
+
     struct json_object *code = NULL, *constants = NULL;
     bool fields = json_object_object_get_ex(root, "code", &code) &&
                   json_object_object_get_ex(root, "constants", &constants) &&
                   code && constants && json_object_get_type(code) == json_type_array &&
                   json_object_get_type(constants) == json_type_array;
-    if (!fields) { json_object_put(root); return false; }
+    if (!fields) goto done;
     size_t code_count = json_object_array_length(code);
     size_t constant_count = json_object_array_length(constants);
-    if (code_count > MAX_ITEMS || constant_count > MAX_ITEMS) { json_object_put(root); return false; }
+    if (code_count > MAX_ITEMS || constant_count > MAX_ITEMS) goto done;
 
-    program->code = calloc(code_count ? code_count : 1, sizeof(*program->code));
-    program->constants = calloc(constant_count ? constant_count : 1, sizeof(*program->constants));
-    if (!program->code || !program->constants) { json_object_put(root); return false; }
+    program->code = calloc(code_count ? code_count : 1u, sizeof(*program->code));
+    program->constants = calloc(constant_count ? constant_count : 1u,
+                                sizeof(*program->constants));
     program->code_count = code_count;
     program->constant_count = constant_count;
+    if (!program->code || !program->constants) goto done;
 
-    bool ok = true;
+    ok = true;
     for (size_t i = 0; i < constant_count && ok; i++)
-        ok = get_value(json_object_array_get_idx(constants, i), &program->constants[i]);
+        ok = get_value(json_object_array_get_idx(constants, i),
+                       &program->constants[i], integer_constants[i]);
     for (size_t i = 0; i < code_count && ok; i++) {
         struct json_object *row = json_object_array_get_idx(code, i);
         if (!row || json_object_get_type(row) != json_type_array) { ok = false; break; }
@@ -322,11 +546,24 @@ static bool parse_program(const unsigned char *body, size_t body_len, Program *p
         if (n < 1 || n > 2) { ok = false; break; }
         struct json_object *name = json_object_array_get_idx(row, 0);
         if (!name || json_object_get_type(name) != json_type_string ||
-            !parse_opcode(json_object_get_string(name), &program->code[i].op)) { ok = false; break; }
+            !parse_opcode(json_object_get_string(name), &program->code[i].op)) {
+            ok = false;
+            break;
+        }
         program->code[i].has_operand = n == 2;
-        if (n == 2 && !get_i64(json_object_array_get_idx(row, 1), &program->code[i].operand)) { ok = false; break; }
+        if (n == 2 &&
+            !get_i64(json_object_array_get_idx(row, 1), &program->code[i].operand)) {
+            ok = false;
+            break;
+        }
     }
-    json_object_put(root);
+
+done:
+    if (root) json_object_put(root);
+    if (tok) json_tokener_free(tok);
+    free(escaped_body);
+    free(normalized_body);
+    free(integer_constants);
     return ok;
 }
 
@@ -386,104 +623,187 @@ static bool validate(const Program *p) {
     return verify_stack(p);
 }
 
-static bool add_i64(int64_t a, int64_t b, int64_t *out) {
-    if ((b > 0 && a > INT64_MAX - b) || (b < 0 && a < INT64_MIN - b)) return false;
-    *out = a + b; return true;
+static Value int_value(BIGNUM *n) {
+    Value v = { .kind = V_INT, .as.integer = n };
+    return v;
 }
-static bool sub_i64(int64_t a, int64_t b, int64_t *out) {
-    if ((b < 0 && a > INT64_MAX + b) || (b > 0 && a < INT64_MIN + b)) return false;
-    *out = a - b; return true;
+static Value bool_value(bool b) {
+    Value v = { .kind = V_BOOL, .as.boolean = b };
+    return v;
 }
-static bool mul_i64(int64_t a, int64_t b, int64_t *out) {
-    if (a == 0 || b == 0) { *out = 0; return true; }
-    if ((a == -1 && b == INT64_MIN) || (b == -1 && a == INT64_MIN)) return false;
-    if (a > 0) {
-        if ((b > 0 && a > INT64_MAX / b) || (b < 0 && b < INT64_MIN / a)) return false;
-    } else if ((b > 0 && a < INT64_MIN / b) || (b < 0 && a < INT64_MAX / b)) return false;
-    *out = a * b; return true;
+static bool pop(Value *stack, size_t *depth, Value *out) {
+    if (!*depth) return false;
+    *out = stack[--(*depth)];
+    return true;
 }
-static Value int_value(int64_t n) { Value v = { .kind = V_INT, .as.integer = n }; return v; }
-static Value bool_value(bool b) { Value v = { .kind = V_BOOL, .as.boolean = b }; return v; }
-static bool pop(Value *stack, size_t *depth, Value *out) { if (!*depth) return false; *out = stack[--*depth]; return true; }
-static bool push(Value *stack, size_t *depth, Value v) { if (*depth >= MAX_STACK) return false; stack[(*depth)++] = v; return true; }
+static bool push(Value *stack, size_t *depth, Value v) {
+    if (*depth >= MAX_STACK) return false;
+    stack[(*depth)++] = v;
+    return true;
+}
 
-static bool execute(const Program *p, Value *result) {
+static bool integer_result(Op op, const BIGNUM *a, const BIGNUM *b,
+                           BNPool *pool, BN_CTX *ctx, BIGNUM **out) {
+    int bits_a = BN_num_bits(a), bits_b = BN_num_bits(b);
+    if (op == OP_MUL && bits_a + bits_b > (int)MAX_INTEGER_BITS + 1) return false;
+    if (op == OP_MOD && BN_is_zero(b)) return false;
+
+    BIGNUM *value = BN_new();
+    if (!value) return false;
+    bool ok = false;
+    if (op == OP_ADD) ok = BN_add(value, a, b) == 1;
+    else if (op == OP_SUB) ok = BN_sub(value, a, b) == 1;
+    else if (op == OP_MUL) ok = BN_mul(value, a, b, ctx) == 1;
+    else if (op == OP_MOD) {
+        BIGNUM *quotient = BN_new();
+        if (quotient) {
+            ok = BN_div(quotient, value, a, b, ctx) == 1;
+            BN_free(quotient);
+            if (ok && !BN_is_zero(value) &&
+                BN_is_negative(value) != BN_is_negative(b))
+                ok = BN_add(value, value, b) == 1;
+        }
+    }
+    if (!ok || (unsigned)BN_num_bits(value) > MAX_INTEGER_BITS) {
+        BN_clear_free(value);
+        return false;
+    }
+    if (!bn_pool_adopt(pool, value)) return false;
+    *out = value;
+    return true;
+}
+
+static bool execute(const Program *p, BNPool *pool, Value *result) {
     Value *stack = calloc(MAX_STACK, sizeof(*stack));
     Value *locals = calloc(MAX_ITEMS, sizeof(*locals));
     bool *initialized = calloc(MAX_ITEMS, sizeof(*initialized));
-    if (!stack || !locals || !initialized) { free(stack); free(locals); free(initialized); return false; }
+    BN_CTX *ctx = BN_CTX_new();
+    if (!stack || !locals || !initialized || !ctx) {
+        free(stack);
+        free(locals);
+        free(initialized);
+        BN_CTX_free(ctx);
+        return false;
+    }
+
     size_t depth = 0, pc = 0, steps = 0;
     bool ok = true;
     while (pc < p->code_count && ok) {
         if (++steps > DEFAULT_MAX_STEPS) { ok = false; break; }
         Instruction ins = p->code[pc++];
         Value a, b, v;
-        int64_t n;
         switch (ins.op) {
-            case OP_CONST: ok = push(stack, &depth, p->constants[(size_t)ins.operand]); break;
-            case OP_POP: ok = pop(stack, &depth, &v); break;
-            case OP_DUP: ok = pop(stack, &depth, &v) && push(stack, &depth, v) && push(stack, &depth, v); break;
+            case OP_CONST:
+                ok = push(stack, &depth, p->constants[(size_t)ins.operand]);
+                break;
+            case OP_POP:
+                ok = pop(stack, &depth, &v);
+                break;
+            case OP_DUP:
+                ok = pop(stack, &depth, &v) &&
+                     push(stack, &depth, v) && push(stack, &depth, v);
+                break;
             case OP_LOAD_LOCAL:
                 if (!initialized[(size_t)ins.operand]) ok = false;
                 else ok = push(stack, &depth, locals[(size_t)ins.operand]);
                 break;
             case OP_STORE_LOCAL:
                 ok = pop(stack, &depth, &v);
-                if (ok) { locals[(size_t)ins.operand] = v; initialized[(size_t)ins.operand] = true; }
+                if (ok) {
+                    locals[(size_t)ins.operand] = v;
+                    initialized[(size_t)ins.operand] = true;
+                }
                 break;
             case OP_NOT:
                 ok = pop(stack, &depth, &v) && v.kind == V_BOOL;
                 if (ok) ok = push(stack, &depth, bool_value(!v.as.boolean));
                 break;
             case OP_NEG:
-                ok = pop(stack, &depth, &v) && v.kind == V_INT && v.as.integer != INT64_MIN;
-                if (ok) ok = push(stack, &depth, int_value(-v.as.integer));
+                ok = pop(stack, &depth, &v) && v.kind == V_INT;
+                if (ok) {
+                    BIGNUM *negative = BN_dup(v.as.integer);
+                    if (!negative) ok = false;
+                    else {
+                        if (!BN_is_zero(negative))
+                            BN_set_negative(negative, !BN_is_negative(negative));
+                        if ((unsigned)BN_num_bits(negative) > MAX_INTEGER_BITS) {
+                            BN_clear_free(negative);
+                            ok = false;
+                        } else if (!bn_pool_adopt(pool, negative)) {
+                            ok = false;
+                        } else {
+                            ok = push(stack, &depth, int_value(negative));
+                        }
+                    }
+                }
                 break;
-            case OP_JUMP: pc = (size_t)ins.operand; break;
+            case OP_JUMP:
+                pc = (size_t)ins.operand;
+                break;
             case OP_JUMP_IF_FALSE:
                 ok = pop(stack, &depth, &v) && v.kind == V_BOOL;
                 if (ok && !v.as.boolean) pc = (size_t)ins.operand;
                 break;
-            case OP_HALT: pc = p->code_count; break;
+            case OP_HALT:
+                pc = p->code_count;
+                break;
             default:
                 ok = pop(stack, &depth, &b) && pop(stack, &depth, &a);
                 if (!ok) break;
                 if (ins.op == OP_EQ || ins.op == OP_NE) {
                     bool equal = a.kind == b.kind;
-                    if (equal && a.kind == V_BOOL) equal = a.as.boolean == b.as.boolean;
-                    else if (equal && a.kind == V_INT) equal = a.as.integer == b.as.integer;
+                    if (equal && a.kind == V_BOOL)
+                        equal = a.as.boolean == b.as.boolean;
+                    else if (equal && a.kind == V_INT)
+                        equal = BN_cmp(a.as.integer, b.as.integer) == 0;
                     else if (equal && a.kind == V_STRING)
                         equal = a.as.string.length == b.as.string.length &&
-                                memcmp(a.as.string.data, b.as.string.data, a.as.string.length) == 0;
-                    ok = push(stack, &depth, bool_value(ins.op == OP_EQ ? equal : !equal));
+                            memcmp(a.as.string.data, b.as.string.data,
+                                   a.as.string.length) == 0;
+                    ok = push(stack, &depth,
+                              bool_value(ins.op == OP_EQ ? equal : !equal));
                 } else if (a.kind == V_STRING && b.kind == V_STRING &&
-                           (ins.op == OP_LT || ins.op == OP_LE || ins.op == OP_GT || ins.op == OP_GE)) {
-                    size_t common = a.as.string.length < b.as.string.length ? a.as.string.length : b.as.string.length;
-                    int cmp = common ? memcmp(a.as.string.data, b.as.string.data, common) : 0;
+                           (ins.op == OP_LT || ins.op == OP_LE ||
+                            ins.op == OP_GT || ins.op == OP_GE)) {
+                    size_t common = a.as.string.length < b.as.string.length
+                        ? a.as.string.length : b.as.string.length;
+                    int cmp = common
+                        ? memcmp(a.as.string.data, b.as.string.data, common) : 0;
                     if (!cmp && a.as.string.length != b.as.string.length)
                         cmp = a.as.string.length < b.as.string.length ? -1 : 1;
                     bool comparison = ins.op == OP_LT ? cmp < 0 :
                                       ins.op == OP_LE ? cmp <= 0 :
                                       ins.op == OP_GT ? cmp > 0 : cmp >= 0;
                     ok = push(stack, &depth, bool_value(comparison));
-                } else if (a.kind != V_INT || b.kind != V_INT) ok = false;
-                else if (ins.op == OP_ADD) ok = add_i64(a.as.integer, b.as.integer, &n) && push(stack, &depth, int_value(n));
-                else if (ins.op == OP_SUB) ok = sub_i64(a.as.integer, b.as.integer, &n) && push(stack, &depth, int_value(n));
-                else if (ins.op == OP_MUL) ok = mul_i64(a.as.integer, b.as.integer, &n) && push(stack, &depth, int_value(n));
-                else if (ins.op == OP_MOD) {
-                    if (!b.as.integer) ok = false;
-                    else if (a.as.integer == INT64_MIN && b.as.integer == -1) ok = push(stack, &depth, int_value(0));
-                    else { n = a.as.integer % b.as.integer; if (n && ((n < 0) != (b.as.integer < 0))) n += b.as.integer; ok = push(stack, &depth, int_value(n)); }
-                } else if (ins.op == OP_LT) ok = push(stack, &depth, bool_value(a.as.integer < b.as.integer));
-                else if (ins.op == OP_LE) ok = push(stack, &depth, bool_value(a.as.integer <= b.as.integer));
-                else if (ins.op == OP_GT) ok = push(stack, &depth, bool_value(a.as.integer > b.as.integer));
-                else if (ins.op == OP_GE) ok = push(stack, &depth, bool_value(a.as.integer >= b.as.integer));
-                else ok = false;
+                } else if (a.kind == V_INT && b.kind == V_INT) {
+                    if (ins.op == OP_ADD || ins.op == OP_SUB ||
+                        ins.op == OP_MUL || ins.op == OP_MOD) {
+                        BIGNUM *computed = NULL;
+                        ok = integer_result(ins.op, a.as.integer, b.as.integer,
+                                            pool, ctx, &computed) &&
+                             push(stack, &depth, int_value(computed));
+                    } else if (ins.op == OP_LT || ins.op == OP_LE ||
+                               ins.op == OP_GT || ins.op == OP_GE) {
+                        int cmp = BN_cmp(a.as.integer, b.as.integer);
+                        bool comparison = ins.op == OP_LT ? cmp < 0 :
+                                          ins.op == OP_LE ? cmp <= 0 :
+                                          ins.op == OP_GT ? cmp > 0 : cmp >= 0;
+                        ok = push(stack, &depth, bool_value(comparison));
+                    } else {
+                        ok = false;
+                    }
+                } else {
+                    ok = false;
+                }
                 break;
         }
     }
-    if (ok) *result = depth ? stack[depth - 1] : (Value){ .kind = V_NIL };
-    free(stack); free(locals); free(initialized);
+
+    if (ok) *result = depth ? stack[depth - 1u] : (Value){ .kind = V_NIL };
+    free(stack);
+    free(locals);
+    free(initialized);
+    BN_CTX_free(ctx);
     return ok;
 }
 
@@ -529,28 +849,59 @@ static bool verify_envelope(const unsigned char *data, size_t length, const unsi
 
 int main(int argc, char **argv) {
     if (argc != 2) return fail("usage: qvm1-seed <file.qvm>");
-    unsigned char *data = NULL; size_t length = 0;
-    if (!read_file(argv[1], &data, &length)) return fail("file tidak valid, berubah, atau melebihi batas");
-    const unsigned char *body = NULL; size_t body_len = 0;
-    if (!verify_envelope(data, length, &body, &body_len)) { free(data); return fail("header atau checksum QVM1 tidak valid"); }
+    unsigned char *data = NULL;
+    size_t length = 0;
+    if (!read_file(argv[1], &data, &length))
+        return fail("file tidak valid, berubah, atau melebihi batas");
+
+    const unsigned char *body = NULL;
+    size_t body_len = 0;
+    if (!verify_envelope(data, length, &body, &body_len)) {
+        free(data);
+        return fail("header atau checksum QVM1 tidak valid");
+    }
+
     Program program = {0};
-    bool parsed = parse_program(body, body_len, &program);
+    BNPool pool = {0};
+    bool parsed = parse_program(body, body_len, &program, &pool);
     free(data);
-    if (!parsed) { free_program(&program); return fail("payload JSON tidak valid"); }
+    if (!parsed) {
+        free_program(&program);
+        bn_pool_free(&pool);
+        return fail("payload JSON tidak valid");
+    }
     if (!validate(&program)) {
         free_program(&program);
+        bn_pool_free(&pool);
         return fail("payload tidak valid atau di luar subset bootstrap seed");
     }
-    Value result; bool ok = execute(&program, &result);
-    if (!ok) { free_program(&program); return fail("eksekusi ditolak, gagal, atau melewati batas langkah"); }
+
+    Value result;
+    bool ok = execute(&program, &pool, &result);
+    if (!ok) {
+        free_program(&program);
+        bn_pool_free(&pool);
+        return fail("eksekusi ditolak, gagal, atau melewati batas langkah/resource integer");
+    }
+
+    int output_status = 0;
     if (result.kind == V_NIL) puts("nil");
     else if (result.kind == V_BOOL) puts(result.as.boolean ? "true" : "false");
     else if (result.kind == V_STRING) {
-        if (fwrite(result.as.string.data, 1, result.as.string.length, stdout) != result.as.string.length || putchar('\n') == EOF) {
-            free_program(&program);
-            return fail("gagal menulis hasil string");
+        if (fwrite(result.as.string.data, 1, result.as.string.length, stdout) !=
+                result.as.string.length || putchar('\n') == EOF)
+            output_status = 1;
+    } else {
+        char *decimal = BN_bn2dec(result.as.integer);
+        if (!decimal) output_status = 1;
+        else {
+            if (printf("%s\n", decimal) < 0) output_status = 1;
+            OPENSSL_free(decimal);
         }
-    } else printf("%" PRId64 "\n", result.as.integer);
+    }
+
     free_program(&program);
+    bn_pool_free(&pool);
+    if (output_status) return fail("gagal menulis hasil QVM");
     return 0;
 }

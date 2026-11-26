@@ -10,6 +10,8 @@ Perubahan penting untuk pengguna Qich dicatat di sini.
 
 ## Unreleased
 
+- Perluas native QVM1 seed ke integer bertanda hingga 13.000 bit memakai OpenSSL BIGNUM; ADD/SUB/MUL/MOD/NEG dan comparison integer mengikuti batas bit reference, modulo mengikuti tanda divisor Python, serta pool integer dibatasi 100.000 nilai/64 MiB. JSON integer constant dinormalisasi secara terkontrol sebelum json-c agar nilai di luar int64 tidak tersaturasi; float, DIV, dan string arithmetic tetap ditolak.
+
 - Pada POSIX, publikasi paket kini memakai `os.fwalk` dan file descriptor direktori yang dipatok untuk memeriksa serta membuka file sumber relatif terhadap direktori induknya; regression test mengganti ancestor menjadi symlink tepat sebelum file dibuka. Fallback non-POSIX tetap path-based, dan operasi penulisan ke direktori registry masih memerlukan hardening descriptor-relative terpisah. Test race kini mem-patch helper I/O yang eksplisit agar pemeriksaan kapabilitas descriptor tidak ikut terpengaruh oleh mock.
 
 - Pada POSIX, ekstraksi ZIP kini menelusuri direktori dengan `dir_fd` + `O_NOFOLLOW`, membuat file sementara dan melakukan rename relatif terhadap parent descriptor yang dipatok; regression test mengganti ancestor menjadi symlink tepat sebelum rename dan memastikan ekstraksi tidak dialihkan ke luar direktori yang dibuka. Platform tanpa primitive ini masih memakai fallback berbasis path.
