@@ -277,7 +277,7 @@ class NativeQVMSeedTests(unittest.TestCase):
         expected = render_value(execute_reference(program))
         result = self.run_program(program)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, expected + "\\n")
+        self.assertEqual(result.stdout, expected + "\n")
 
     def test_native_bigint_13000_bit_boundaries(self):
         positive = 1 << 12999
@@ -294,7 +294,7 @@ class NativeQVMSeedTests(unittest.TestCase):
                 expected = render_value(execute_reference(program))
                 result = self.run_program(program)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout, expected + "\\n")
+                self.assertEqual(result.stdout, expected + "\n")
 
         overflow_programs = [
             {"constants": [positive, positive],
@@ -317,7 +317,7 @@ class NativeQVMSeedTests(unittest.TestCase):
             expected = render_value(execute_reference(program))
             result = self.run_program(program)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout, expected + "\\n")
+            self.assertEqual(result.stdout, expected + "\n")
 
     def test_noncanonical_integer_constants_are_rejected(self):
         for token in (b"-0", b"00"):
