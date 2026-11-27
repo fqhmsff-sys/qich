@@ -12,8 +12,11 @@ Legenda: **TESTED** = ada test otomatis yang lulus di lingkungan pengembangan (L
 | Pattern matching, Result + `?`, try/catch/throw, async/await (thread) | TESTED | |
 | Modul `use mod:`/`pkg:`, impor melingkar terdeteksi | TESTED | |
 | Compiler → `.qhc` (AST ter-serialisasi + SHA-256, diverifikasi saat load) | TESTED | **bukan** bytecode VM atau native; lihat DECISIONS |
-| Bytecode VM, kompilasi native, GC sendiri | PLANNED | memori dikelola Python (aman: tanpa UB, indeks dicek) |
-| Core compiler/runtime dalam Rust | PLANNED / UNAVAILABLE di sandbox | tidak ada `rustc` di lingkungan pengembangan; implementasi referensi ini ditulis Python |
+| QVM1 bytecode versioned + reference stack executor | EXPERIMENTAL | compiler subset AST → QVM1 dan executor referensi masih Python; lihat BOOTSTRAP.md |
+| QVM1 verifier/executor source prototype dalam Qich | EXPERIMENTAL | `bootstrap/qvm1.qh` diuji melalui reference runtime; belum native executable atau bootstrap mandiri |
+| Native bootstrap seed QVM1 | EXPERIMENTAL | `bootstrap/native/qvm1_seed.c`; mendukung nil/bool/string dan signed integer hingga 13.000 bit (OpenSSL BIGNUM), ADD/SUB/MUL/MOD/NEG, equality/comparison, local dan branch terbatas. Build-time C + OpenSSL `libcrypto` + `json-c`; bukan full-conformance atau runtime final. Suite native: 21 test methods, 37 kasus differential bernama, 64 malformed-payload fuzz-smoke cases; ASan/UBSan pada Linux CI. |
+| Native compiler/runtime, self-hosted compiler, GC sendiri | PLANNED | toolchain mandiri belum tersedia; memori reference runtime masih dikelola Python |
+| Compiler/runtime Qich-native dan self-hosted | PLANNED | source akhir wajib Qich; bootstrap seed C/Rust hanya build-time sementara, bukan runtime host permanen |
 | Formatter (indentasi + spasi, idempoten, menjaga komentar), `qh doc` | TESTED | formatter berbasis baris, bukan pretty-printer AST |
 
 ## Toolchain
@@ -42,4 +45,8 @@ Penambahan adapter = satu entri registry + satu modul adapter (tanpa mengubah co
 Linux: TESTED. Windows, macOS: kode portabel (Python/stdlib) tetapi **tidak diuji**. Android, iOS: hanya generator source (IMPLEMENTED, tidak dikompilasi).
 
 ## Keamanan
-Lihat `security/SECURITY.md` — tiap klaim ada test. Belum ada: signed releases (PLANNED), batas memori proses, isolasi proses untuk `py:`, registry HTTPS.
+Lihat `security/SECURITY.md` — tiap klaim ada test. QVM1 memiliki batas bytecode, stack, langkah, ukuran integer, dan pool integer; ini bukan batas RSS/CPU tingkat proses. Belum ada: signed releases (PLANNED), batas memori/CPU proses, isolasi proses untuk `py:`, registry HTTPS/TUF.
+
+## Kemandirian
+
+Qich **belum mandiri**. QVM1 reference compiler/verifier/executor masih Python berstatus EXPERIMENTAL. Seed C native menjalankan subset QVM1 yang terbatas, termasuk signed BigInt hingga 13.000 bit, tetapi belum full-conformance dan masih bergantung pada C compiler/OpenSSL/`json-c` saat build-time. Compiler utama, runtime/VM penuh, package tooling inti, dan minimum stdlib masih membutuhkan Python sebagai host. Tenggat final kemandirian adalah **14 Desember 2026**; gerbang penerimaan dan tahapan bootstrap ada di [BOOTSTRAP.md](BOOTSTRAP.md). Tidak ada klaim self-hosting sebelum clean-room build tanpa Python/Node dan stage0 → stage1 → stage2 lulus.

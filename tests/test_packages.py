@@ -1,12 +1,16 @@
-import json, os, shutil, tempfile, unittest
+import hashlib, io, json, os, shutil, tempfile, unittest, zipfile
+from unittest import mock
 from helpers import qh, ROOT
-from qich.package import registry
+from qich.package import lock, registry
+from qich.package.resolver import ensure_deps
 from qich.compiler.diagnostics import QichError
+from qich.security import safe_extract_zip
 
 
 def w(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    open(path, "w", encoding="utf-8").write(text)
+    with open(path, "w", encoding="utf-8") as stream:
+        stream.write(text)
 
 
 def mkpkg(d, name, version, lib_body, deps=""):
@@ -31,7 +35,8 @@ class Packages(unittest.TestCase):
         p = qh(["add", "--path", "../mylib", "mylib"], app); self.assertEqual(p.returncode, 0, p.stderr)
         w(os.path.join(app, "src", "main.qh"), 'use pkg:mylib\nfn main() { print(mylib.dobel(21)) }\n')
         p = qh(["run"], app); self.assertEqual(p.stdout.strip(), "42", p.stderr)
-        self.assertIn("sha256", open(os.path.join(app, "qh.lock")).read())
+        with open(os.path.join(app, "qh.lock"), encoding="utf-8") as stream:
+            self.assertIn("sha256", stream.read())
         p = qh(["build"], app); self.assertEqual(p.returncode, 0, p.stderr)
         shutil.rmtree(os.path.join(app, ".qh")); shutil.rmtree(lib)  # .qhc mandiri, tanpa dependensi
         p = qh(["run", "build/app.qhc"], app); self.assertEqual(p.stdout.strip(), "42", p.stderr)
@@ -54,9 +59,11 @@ class Packages(unittest.TestCase):
         app = self.proj(); p = qh(["add", "greet"], app, self.env); self.assertEqual(p.returncode, 0, p.stderr)
         w(os.path.join(app, "src", "main.qh"), 'use pkg:greet\nfn main() { print(greet.hi()) }\n')
         self.assertEqual(qh(["run"], app, self.env).stdout.strip(), "v1.1")
-        idx = json.load(open(os.path.join(self.reg, "index.json")))
+        with open(os.path.join(self.reg, "index.json"), encoding="utf-8") as stream:
+            idx = json.load(stream)
         idx["advisories"] = {"greet": [{"id": "QH-2026-0001", "summary": "contoh", "affected": ["<1.2.0"]}]}
-        json.dump(idx, open(os.path.join(self.reg, "index.json"), "w"))
+        with open(os.path.join(self.reg, "index.json"), "w", encoding="utf-8") as stream:
+            json.dump(idx, stream)
         p = qh(["audit"], app, self.env); self.assertNotEqual(p.returncode, 0); self.assertIn("QH-2026-0001", p.stdout)
 
     def test_registry_archive_tamper_detected(self):
@@ -81,8 +88,10 @@ class Packages(unittest.TestCase):
         lib = os.path.join(self.t, "internal"); mkpkg(lib, "internal", "1.0.0", 'fn f() rtrn => "privat"\n')
         app = self.proj(); qh(["add", "--path", "../internal", "internal"], app)
         evil = os.path.join(self.t, "evil"); mkpkg(evil, "internal", "9.9.9", 'fn f() rtrn => "jahat"\n'); qh(["publish", self.reg], evil)
-        toml = open(os.path.join(app, "qh.toml")).read().replace('internal = { path = "../internal" }', 'internal = "9.9.9"')
-        open(os.path.join(app, "qh.toml"), "w").write(toml)
+        with open(os.path.join(app, "qh.toml"), encoding="utf-8") as stream:
+            toml = stream.read().replace('internal = { path = "../internal" }', 'internal = "9.9.9"')
+        with open(os.path.join(app, "qh.toml"), "w", encoding="utf-8") as stream:
+            stream.write(toml)
         w(os.path.join(app, "src", "main.qh"), 'use pkg:internal\nfn main() { print(internal.f()) }\n')
         p = qh(["run"], app, self.env); self.assertNotEqual(p.returncode, 0); self.assertIn("dependency confusion", p.stderr)
 
@@ -92,6 +101,54 @@ class Packages(unittest.TestCase):
         app = self.proj(); p = qh(["add", "--path", "../a", "pa"], app)
         self.assertNotEqual(p.returncode, 0); self.assertIn("melingkar", p.stderr)
 
+
+    def test_registry_index_is_bounded_and_rejects_duplicate_keys(self):
+        os.makedirs(self.reg, exist_ok=True)
+        old_limit = registry.MAX_INDEX_BYTES
+        try:
+            registry.MAX_INDEX_BYTES = 64
+            with open(os.path.join(self.reg, "index.json"), "wb") as f:
+                f.write(b" " * 65)
+            with self.assertRaises(QichError) as c:
+                registry.load_index(self.reg)
+            self.assertEqual(c.exception.kind, "ResourceLimit")
+
+            registry.MAX_INDEX_BYTES = 1024
+            with open(os.path.join(self.reg, "index.json"), "wb") as f:
+                f.write(b'{"packages":{},"packages":{}}')
+            with self.assertRaises(QichError):
+                registry.load_index(self.reg)
+        finally:
+            registry.MAX_INDEX_BYTES = old_limit
+
+    def test_registry_archive_size_and_path_are_bounded(self):
+        os.makedirs(self.reg, exist_ok=True)
+        archive = os.path.join(self.reg, "demo-1.0.0.qhpkg")
+        with open(archive, "wb") as f:
+            f.write(b"0123456789")
+        old_limit = registry.MAX_ARCHIVE_BYTES
+        try:
+            registry.MAX_ARCHIVE_BYTES = 8
+            with self.assertRaises(QichError) as c:
+                registry.fetch(self.reg, "demo", "1.0.0", {
+                    "file": "demo-1.0.0.qhpkg",
+                    "sha256": hashlib.sha256(b"0123456789").hexdigest(),
+                })
+            self.assertEqual(c.exception.kind, "ResourceLimit")
+            with self.assertRaises(QichError):
+                registry.fetch(self.reg, "demo", "1.0.0", {
+                    "file": "../outside.qhpkg",
+                    "sha256": "0" * 64,
+                })
+        finally:
+            registry.MAX_ARCHIVE_BYTES = old_limit
+
+    def test_registry_rejects_malformed_version_metadata(self):
+        os.makedirs(self.reg, exist_ok=True)
+        with open(os.path.join(self.reg, "index.json"), "w", encoding="utf-8") as f:
+            json.dump({"packages": {"demo": {"versions": {"1.0.0": None}}}}, f)
+        with self.assertRaises(QichError):
+            registry.resolve(self.reg, "demo", "*")
 
     def test_caret_version_ranges_follow_semver(self):
         os.makedirs(self.reg, exist_ok=True)
@@ -107,9 +164,11 @@ class Packages(unittest.TestCase):
     def test_dependency_name_path_traversal_rejected(self):
         app = self.proj()
         manifest_path = os.path.join(app, "qh.toml")
-        text = open(manifest_path, encoding="utf-8").read()
+        with open(manifest_path, encoding="utf-8") as stream:
+            text = stream.read()
         text = text.replace("[dependencies]", '[dependencies]\n"../../outside" = { path = "../mylib" }', 1)
-        open(manifest_path, "w", encoding="utf-8").write(text)
+        with open(manifest_path, "w", encoding="utf-8") as stream:
+            stream.write(text)
         p = qh(["run"], app)
         self.assertNotEqual(p.returncode, 0)
         self.assertIn("nama dependensi tidak valid", p.stderr)
@@ -117,13 +176,511 @@ class Packages(unittest.TestCase):
 
     def test_bridge_allow_is_recorded_not_installed(self):
         app = self.proj(); p = qh(["add", "py:numpy"], app); self.assertEqual(p.returncode, 0)
-        self.assertIn('py:numpy', open(os.path.join(app, "qh.toml")).read()); self.assertIn("tidak meng-install", p.stdout)
+        with open(os.path.join(app, "qh.toml"), encoding="utf-8") as stream:
+            self.assertIn("py:numpy", stream.read())
+        self.assertIn("tidak meng-install", p.stdout)
 
     def test_unknown_module_path_traversal(self):
         app = self.proj()
         w(os.path.join(app, "src", "main.qh"), 'use mod:..secret\nfn main() { }\n')
         self.assertNotEqual(qh(["run"], app).returncode, 0)
 
+    def test_registry_rejects_symlink_index_and_publish_preserves_target(self):
+        os.makedirs(self.reg, exist_ok=True)
+        outside = os.path.join(self.t, "outside-index.json")
+        original = b'{"packages":{},"marker":"must stay unchanged"}'
+        with open(outside, "wb") as stream:
+            stream.write(original)
+        index = os.path.join(self.reg, "index.json")
+        try:
+            os.symlink(outside, index)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink tidak didukung di lingkungan ini")
+
+        with self.assertRaises(QichError) as caught:
+            registry.load_index(self.reg)
+        self.assertEqual(caught.exception.kind, "SecurityError")
+
+        lib = os.path.join(self.t, "safe"); mkpkg(lib, "safe", "1.0.0", "fn f() rtrn => 1\n")
+        with self.assertRaises(QichError):
+            registry.publish(lib, "safe", "1.0.0", self.reg)
+        with open(outside, "rb") as stream:
+            self.assertEqual(stream.read(), original)
+
+    def test_publish_does_not_replace_malformed_registry_index(self):
+        os.makedirs(self.reg, exist_ok=True)
+        index = os.path.join(self.reg, "index.json")
+        original = b'{"packages":'
+        with open(index, "wb") as stream:
+            stream.write(original)
+        lib = os.path.join(self.t, "safe"); mkpkg(lib, "safe", "1.0.0", "fn f() rtrn => 1\n")
+        with self.assertRaises(QichError):
+            registry.publish(lib, "safe", "1.0.0", self.reg)
+        with open(index, "rb") as stream:
+            self.assertEqual(stream.read(), original)
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "safe-1.0.0.qhpkg")))
+
+    def test_publish_archive_limit_is_enforced_during_writing(self):
+        os.makedirs(self.reg, exist_ok=True)
+        lib = os.path.join(self.t, "large"); mkpkg(lib, "large", "1.0.0", "fn f() rtrn => 1\n")
+        with open(os.path.join(lib, "src", "random.bin"), "wb") as stream:
+            stream.write(os.urandom(4096))
+        old_limit = registry.MAX_ARCHIVE_BYTES
+        try:
+            registry.MAX_ARCHIVE_BYTES = 256
+            with self.assertRaises(QichError) as caught:
+                registry.publish(lib, "large", "1.0.0", self.reg)
+            self.assertEqual(caught.exception.kind, "ResourceLimit")
+        finally:
+            registry.MAX_ARCHIVE_BYTES = old_limit
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "large-1.0.0.qhpkg")))
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "index.json")))
+        self.assertFalse(any(name.startswith(".qich-publish-") for name in os.listdir(self.reg)))
+
+
+    def test_publish_uncompressed_limit_matches_extractor(self):
+        os.makedirs(self.reg, exist_ok=True)
+        lib = os.path.join(self.t, "expanded"); mkpkg(lib, "expanded", "1.0.0", "fn f() rtrn => 1\n")
+        with open(os.path.join(lib, "src", "large.bin"), "wb") as stream:
+            stream.write(os.urandom(4096))
+        old_limit = registry.MAX_PACKAGE_CONTENT_BYTES
+        try:
+            registry.MAX_PACKAGE_CONTENT_BYTES = 512
+            with self.assertRaises(QichError) as caught:
+                registry.publish(lib, "expanded", "1.0.0", self.reg)
+            self.assertEqual(caught.exception.kind, "ResourceLimit")
+        finally:
+            registry.MAX_PACKAGE_CONTENT_BYTES = old_limit
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "expanded-1.0.0.qhpkg")))
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "index.json")))
+
+    def test_publish_rejects_file_swapped_to_symlink_after_entry_stat(self):
+        lib = os.path.join(self.t, "race"); mkpkg(lib, "race", "1.0.0", "fn f() rtrn => 1\n")
+        target = os.path.join(lib, "src", "race.bin")
+        outside = os.path.join(self.t, "outside.bin")
+        with open(target, "wb") as stream:
+            stream.write(b"inside")
+        with open(outside, "wb") as stream:
+            stream.write(b"outside-secret")
+        original_stat = registry._stat_package_entry
+        swapped = False
+
+        def stat_then_swap(path, *, dir_fd=None):
+            nonlocal swapped
+            info = original_stat(path, dir_fd=dir_fd)
+            candidate = os.path.abspath(os.fspath(path)) if dir_fd is None else os.fspath(path)
+            if not swapped and (
+                candidate == os.path.abspath(target)
+                or (candidate == "race.bin" and dir_fd is not None)
+            ):
+                swapped = True
+                os.unlink(target)
+                os.symlink(outside, target)
+            return info
+
+        with mock.patch("qich.package.registry._stat_package_entry", side_effect=stat_then_swap):
+            with self.assertRaises(QichError) as caught:
+                registry.publish(lib, "race", "1.0.0", self.reg)
+        self.assertTrue(swapped)
+        self.assertEqual(caught.exception.kind, "SecurityError")
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "race-1.0.0.qhpkg")))
+        with open(outside, "rb") as stream:
+            self.assertEqual(stream.read(), b"outside-secret")
+        self.assertFalse(any(name.startswith(".qich-publish-") for name in os.listdir(self.reg)))
+
+    def test_publish_enforces_uncompressed_limit_on_streamed_bytes(self):
+        lib = os.path.join(self.t, "growing"); mkpkg(lib, "growing", "1.0.0", "fn f() rtrn => 1\n")
+        target = os.path.join(lib, "src", "zzz-growth.bin")
+        with open(target, "wb") as stream:
+            stream.write(b"x")
+        target_info = os.stat(target)
+        original_fdopen = os.fdopen
+        grown = False
+
+        class GrowingReader:
+            def __init__(self, stream):
+                self.stream = stream
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return self.stream.__exit__(*exc)
+
+            def read(self, size=-1):
+                nonlocal grown
+                if not grown:
+                    with open(target, "ab") as output:
+                        output.write(b"z" * 1024)
+                    grown = True
+                return self.stream.read(size)
+
+        def fdopen_with_growth(fd, *args, **kwargs):
+            opened = os.fstat(fd)
+            mode = args[0] if args else kwargs.get("mode", "r")
+            stream = original_fdopen(fd, *args, **kwargs)
+            if mode == "rb" and os.path.samestat(opened, target_info):
+                return GrowingReader(stream)
+            return stream
+
+        old_limit = registry.MAX_PACKAGE_CONTENT_BYTES
+        try:
+            registry.MAX_PACKAGE_CONTENT_BYTES = 512
+            with mock.patch("qich.package.registry.os.fdopen", side_effect=fdopen_with_growth):
+                with self.assertRaises(QichError) as caught:
+                    registry.publish(lib, "growing", "1.0.0", self.reg)
+        finally:
+            registry.MAX_PACKAGE_CONTENT_BYTES = old_limit
+        self.assertTrue(grown)
+        self.assertEqual(caught.exception.kind, "ResourceLimit")
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "growing-1.0.0.qhpkg")))
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "index.json")))
+        self.assertFalse(any(name.startswith(".qich-publish-") for name in os.listdir(self.reg)))
+
+    def test_publish_rejects_symlink_package_members(self):
+        lib = os.path.join(self.t, "symlinked"); mkpkg(lib, "symlinked", "1.0.0", "fn f() rtrn => 1\n")
+        outside = os.path.join(self.t, "outside.qh")
+        with open(outside, "w", encoding="utf-8") as stream:
+            stream.write("fn outside() rtrn => 1\n")
+        try:
+            os.symlink(outside, os.path.join(lib, "src", "linked.qh"))
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink tidak didukung di lingkungan ini")
+        with self.assertRaises(QichError) as caught:
+            registry.publish(lib, "symlinked", "1.0.0", self.reg)
+        self.assertEqual(caught.exception.kind, "SecurityError")
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "symlinked-1.0.0.qhpkg")))
+
+
+    def test_publish_rejects_null_package_metadata(self):
+        os.makedirs(self.reg, exist_ok=True)
+        index = os.path.join(self.reg, "index.json")
+        original = b'{"packages":{"safe":null}}'
+        with open(index, "wb") as stream:
+            stream.write(original)
+        lib = os.path.join(self.t, "safe"); mkpkg(lib, "safe", "1.0.0", "fn f() rtrn => 1\n")
+        with self.assertRaises(QichError):
+            registry.publish(lib, "safe", "1.0.0", self.reg)
+        with open(index, "rb") as stream:
+            self.assertEqual(stream.read(), original)
+
+    def test_advisory_lookup_fails_closed_on_corrupt_index(self):
+        os.makedirs(self.reg, exist_ok=True)
+        self.assertEqual(registry.advisories(self.reg, "safe", "1.0.0"), [])
+        with open(os.path.join(self.reg, "index.json"), "wb") as stream:
+            stream.write(b'{"packages":')
+        with self.assertRaises(QichError):
+            registry.advisories(self.reg, "safe", "1.0.0")
+
+
+
+    def test_path_dependency_rejects_symlink_root_before_copy(self):
+        base = os.path.join(self.t, "symlink-root")
+        os.makedirs(base)
+        lib = os.path.join(base, "real-lib")
+        mkpkg(lib, "mylib", "1.0.0", "fn f() rtrn => 1\n")
+        link = os.path.join(base, "linked-lib")
+        try:
+            os.symlink(lib, link, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink tidak didukung di lingkungan ini")
+
+        created = qh(["new", "app"], base)
+        self.assertEqual(created.returncode, 0, created.stderr)
+        app = os.path.join(base, "app")
+        w(os.path.join(app, "qh.toml"),
+          '[package]\nname = "app"\nversion = "1.0.0"\n\n'
+          '[dependencies]\nmylib = { path = "../linked-lib" }\n')
+        with self.assertRaises(QichError) as caught:
+            ensure_deps(app)
+        self.assertEqual(caught.exception.kind, "SecurityError")
+        self.assertFalse(os.path.lexists(os.path.join(app, ".qh", "deps", "mylib")))
+
+    def test_path_dependency_rejects_symlink_members_before_copy(self):
+        for kind in ("file", "directory"):
+            with self.subTest(kind=kind):
+                base = os.path.join(self.t, kind)
+                os.makedirs(base)
+                lib = os.path.join(base, "mylib")
+                mkpkg(lib, "mylib", "1.0.0", "fn f() rtrn => 1\n")
+                outside = os.path.join(base, "outside")
+                if kind == "file":
+                    with open(outside, "w", encoding="utf-8") as stream:
+                        stream.write("fn leaked() rtrn => 99\n")
+                    link_path = os.path.join(lib, "src", "linked.qh")
+                else:
+                    os.makedirs(outside)
+                    w(os.path.join(outside, "secret.qh"), "fn leaked() rtrn => 99\n")
+                    link_path = os.path.join(lib, "src", "external")
+
+                try:
+                    os.symlink(outside, link_path, target_is_directory=(kind == "directory"))
+                except (OSError, NotImplementedError):
+                    self.skipTest("symlink tidak didukung di lingkungan ini")
+
+                created = qh(["new", "app"], base)
+                self.assertEqual(created.returncode, 0, created.stderr)
+                app = os.path.join(base, "app")
+                result = qh(["add", "--path", "../mylib", "mylib"], app)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("symlink", result.stderr.lower())
+                self.assertFalse(os.path.lexists(os.path.join(app, ".qh", "deps", "mylib")))
+
+
+    def test_pkg_hash_rejects_symlink_root(self):
+        lib = os.path.join(self.t, "hash-root")
+        mkpkg(lib, "hashroot", "1.0.0", "fn f() rtrn => 1\n")
+        link = os.path.join(self.t, "hash-root-link")
+        try:
+            os.symlink(lib, link, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink tidak didukung di lingkungan ini")
+        with self.assertRaises(QichError):
+            lock.pkg_hash(link)
+
+    def test_lock_read_and_write_reject_symlink_without_touching_target(self):
+        app = self.proj()
+        outside = os.path.join(self.t, "outside-lock.toml")
+        original = b"marker = \"keep me\"\n"
+        with open(outside, "wb") as stream:
+            stream.write(original)
+        lock_path = os.path.join(app, "qh.lock")
+        try:
+            os.symlink(outside, lock_path)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink tidak didukung di lingkungan ini")
+        with self.assertRaises(QichError):
+            lock.read(app)
+        with self.assertRaises(QichError):
+            lock.write(app, {})
+        with open(outside, "rb") as stream:
+            self.assertEqual(stream.read(), original)
+
+    def test_vendor_directory_symlinks_are_rejected_before_writing(self):
+        for component in (".qh", "deps"):
+            with self.subTest(component=component):
+                base = os.path.join(self.t, component)
+                os.makedirs(base, exist_ok=True)
+                lib = os.path.join(base, "mylib")
+                mkpkg(lib, "mylib", "1.0.0", "fn f() rtrn => 1\n")
+                app = os.path.join(base, "app")
+                created = qh(["new", "app"], base)
+                self.assertEqual(created.returncode, 0, created.stderr)
+                w(os.path.join(app, "qh.toml"),
+                  '[package]\nname = "app"\nversion = "1.0.0"\n\n'
+                  '[dependencies]\nmylib = { path = "../mylib" }\n')
+                outside = os.path.join(base, "outside-state")
+                os.makedirs(outside, exist_ok=True)
+                state_dir = os.path.join(app, ".qh")
+                deps_dir = os.path.join(state_dir, "deps")
+                os.makedirs(deps_dir, exist_ok=True)
+                if component == ".qh":
+                    shutil.rmtree(state_dir)
+                    link = state_dir
+                else:
+                    shutil.rmtree(deps_dir)
+                    link = deps_dir
+                try:
+                    os.symlink(outside, link, target_is_directory=True)
+                except (OSError, NotImplementedError):
+                    self.skipTest("symlink tidak didukung di lingkungan ini")
+                with self.assertRaises(QichError):
+                    ensure_deps(app)
+                self.assertFalse(os.path.lexists(os.path.join(outside, "mylib")))
+
+    def test_vendor_dependency_entry_symlink_is_rejected(self):
+        base = os.path.join(self.t, "vendor-entry")
+        os.makedirs(base)
+        lib = os.path.join(base, "mylib")
+        mkpkg(lib, "mylib", "1.0.0", "fn f() rtrn => 1\n")
+        app = os.path.join(base, "app")
+        created = qh(["new", "app"], base)
+        self.assertEqual(created.returncode, 0, created.stderr)
+        w(os.path.join(app, "qh.toml"),
+          '[package]\nname = "app"\nversion = "1.0.0"\n\n'
+          '[dependencies]\nmylib = { path = "../mylib" }\n')
+        entry = os.path.join(app, ".qh", "deps", "mylib")
+        os.makedirs(os.path.dirname(entry), exist_ok=True)
+        try:
+            os.symlink(lib, entry, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink tidak didukung di lingkungan ini")
+        with self.assertRaises(QichError):
+            ensure_deps(app)
+        self.assertTrue(os.path.isdir(lib))
+
+
+
+    def test_lock_read_rejects_duplicate_package_names(self):
+        app = self.proj()
+        payload = (
+            'version = 1\n'
+            '[[package]]\nname = "demo"\nversion = "1.0.0"\n'
+            'source = "path:../demo"\nsha256 = "' + "a" * 64 + '"\n'
+            '[[package]]\nname = "demo"\nversion = "2.0.0"\n'
+            'source = "registry:local"\nsha256 = "' + "b" * 64 + '"\n'
+        )
+        with open(os.path.join(app, "qh.lock"), "w", encoding="utf-8") as stream:
+            stream.write(payload)
+        with self.assertRaises(QichError) as caught:
+            lock.read(app)
+        self.assertEqual(caught.exception.kind, "ManifestError")
+
+    def test_lock_read_rejects_unsupported_version_and_invalid_digest(self):
+        app = self.proj()
+        valid_entry = (
+            '[[package]]\nname = "demo"\nversion = "1.0.0"\n'
+            'source = "path:../demo"\nsha256 = "' + "a" * 64 + '"\n'
+        )
+        for payload in (
+            "version = 2\n" + valid_entry,
+            'version = 1\n[[package]]\nname = "demo"\nversion = "1.0.0"\n'
+            'source = "path:../demo"\nsha256 = "not-a-digest"\n',
+            'version = 1\n[[package]]\nname = "demo"\nversion = "1.0.0"\n'
+            'source = "path:../demo"\nsha256 = "' + "a" * 64 + '"\ntrusted = true\n',
+        ):
+            with self.subTest(payload=payload[:24]):
+                with open(os.path.join(app, "qh.lock"), "w", encoding="utf-8") as stream:
+                    stream.write(payload)
+                with self.assertRaises(QichError) as caught:
+                    lock.read(app)
+                self.assertEqual(caught.exception.kind, "ManifestError")
+
+    def test_lock_write_escapes_source_string_and_roundtrips(self):
+        app = self.proj()
+        source = 'path:../lib"' + chr(92) + '\n[[package]]\nname = "injected"'
+        entry = {
+            "name": "demo",
+            "version": "1.0.0",
+            "source": source,
+            "sha256": "a" * 64,
+        }
+        lock.write(app, {"demo": entry})
+        self.assertEqual(lock.read(app), {"demo": entry})
+
+    def test_pkg_hash_fails_closed_on_directory_walk_error(self):
+        lib = os.path.join(self.t, "walk-denied")
+        mkpkg(lib, "walkdenied", "1.0.0", "fn f() rtrn => 1\n")
+        with mock.patch("os.scandir", side_effect=PermissionError("denied")):
+            with self.assertRaises(QichError) as caught:
+                lock.pkg_hash(lib)
+        self.assertEqual(caught.exception.kind, "SecurityError")
+
+
+    @unittest.skipUnless(
+        registry._supports_descriptor_publish(),
+        "descriptor-relative package traversal is POSIX-specific",
+    )
+    def test_publish_reads_from_pinned_source_directory_after_ancestor_swap(self):
+        lib = os.path.join(self.t, "publish-pinned")
+        mkpkg(lib, "publishpinned", "1.0.0", "fn f() rtrn => 1\n")
+        nested = os.path.join(lib, "src", "nested")
+        outside = os.path.join(self.t, "outside")
+        moved = os.path.join(self.t, "nested-original")
+        os.makedirs(nested)
+        os.makedirs(outside)
+        original = b"content from the already-open directory"
+        redirected = b"content reached through the replacement symlink"
+        source_path = os.path.join(nested, "payload.qh")
+        with open(source_path, "wb") as stream:
+            stream.write(original)
+        with open(os.path.join(outside, "payload.qh"), "wb") as stream:
+            stream.write(redirected)
+
+        original_open = os.open
+        swapped = False
+
+        def swap_ancestor_before_open(path, flags, *, dir_fd=None):
+            nonlocal swapped
+            candidate = os.fspath(path)
+            if not swapped and (
+                candidate == source_path
+                or (candidate == "payload.qh" and dir_fd is not None)
+            ):
+                os.rename(nested, moved)
+                os.symlink(outside, nested, target_is_directory=True)
+                swapped = True
+            return original_open(path, flags, dir_fd=dir_fd)
+
+        with mock.patch(
+            "qich.package.registry._open_package_file",
+            side_effect=swap_ancestor_before_open,
+        ):
+            registry.publish(lib, "publishpinned", "1.0.0", self.reg)
+
+        self.assertTrue(swapped)
+        archive_path = os.path.join(self.reg, "publishpinned-1.0.0.qhpkg")
+        with zipfile.ZipFile(archive_path) as archive:
+            self.assertEqual(archive.read("src/nested/payload.qh"), original)
+
+    def test_publish_fails_closed_on_directory_walk_error(self):
+        os.makedirs(self.reg, exist_ok=True)
+        lib = os.path.join(self.t, "publish-walk-denied")
+        mkpkg(lib, "walkdenied", "1.0.0", "fn f() rtrn => 1\n")
+        with mock.patch("os.scandir", side_effect=PermissionError("denied")):
+            with self.assertRaises(QichError) as caught:
+                registry.publish(lib, "walkdenied", "1.0.0", self.reg)
+        self.assertEqual(caught.exception.kind, "SecurityError")
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "walkdenied-1.0.0.qhpkg")))
+        self.assertFalse(os.path.exists(os.path.join(self.reg, "index.json")))
+        self.assertFalse(any(name.startswith(".qich-publish-") for name in os.listdir(self.reg)))
+
+    def test_lock_read_rejects_version_components_over_registry_limit(self):
+        app = self.proj()
+        payload = (
+            'version = 1\n[[package]]\nname = "demo"\nversion = "'
+            + "1" * 10
+            + '.0.0"\nsource = "path:../demo"\nsha256 = "'
+            + "a" * 64
+            + '"\n'
+        )
+        with open(os.path.join(app, "qh.lock"), "w", encoding="utf-8") as stream:
+            stream.write(payload)
+        with self.assertRaises(QichError) as caught:
+            lock.read(app)
+        self.assertEqual(caught.exception.kind, "ManifestError")
+
+
+
+    @unittest.skipUnless(
+        os.name == "posix"
+        and hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "O_DIRECTORY")
+        and all(function in os.supports_dir_fd for function in (os.open, os.mkdir, os.stat, os.unlink)),
+        "directory-descriptor extraction is POSIX-specific",
+    )
+    def test_zip_extraction_stays_in_pinned_parent_after_ancestor_swap(self):
+        destination = os.path.join(self.t, "extract")
+        outside = os.path.join(self.t, "outside")
+        moved = os.path.join(self.t, "nested-original")
+        os.mkdir(outside)
+
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w", compression=zipfile.ZIP_STORED) as archive:
+            archive.writestr("nested/payload.txt", b"kept inside the opened directory")
+
+        original_rename = os.rename
+        swapped = False
+
+        def swap_ancestor_before_relative_rename(src, dst, *args, **kwargs):
+            nonlocal swapped
+            if kwargs.get("src_dir_fd") is not None and not swapped:
+                nested = os.path.join(destination, "nested")
+                original_rename(nested, moved)
+                os.symlink(outside, nested)
+                swapped = True
+            return original_rename(src, dst, *args, **kwargs)
+
+        with mock.patch(
+            "qich.security.os.rename",
+            side_effect=swap_ancestor_before_relative_rename,
+        ):
+            safe_extract_zip(payload.getvalue(), destination)
+
+        self.assertTrue(swapped)
+        with open(os.path.join(moved, "payload.txt"), "rb") as stream:
+            self.assertEqual(stream.read(), b"kept inside the opened directory")
+        self.assertFalse(os.path.exists(os.path.join(outside, "payload.txt")))
 
 if __name__ == "__main__":
     unittest.main()

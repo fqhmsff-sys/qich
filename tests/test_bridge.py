@@ -1,3 +1,4 @@
+import json
 import os, shutil, subprocess, tempfile, unittest
 from helpers import run, Policy, QichError
 
@@ -24,11 +25,99 @@ class Bridge(unittest.TestCase):
         self.assertEqual(out.split("\n"), ["a/b y.txt", "n-5", "b", ""])
 
     @unittest.skipUnless(shutil.which("node"), "node tidak tersedia")
+    def test_javascript_bridge_preserves_proto_key_without_prototype_mutation(self):
+        helper = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "..", "src", "qich", "bridge", "js_helper.js"
+        ))
+        script = r"""
+const { enc, dec, safeMemberName } = require(process.argv[1]);
+const input = JSON.parse('{"__proto__":{"polluted":true},"safe":1}');
+const encoded = enc(input);
+if (Object.getPrototypeOf(encoded.v) !== null) process.exit(2);
+if (!Object.prototype.hasOwnProperty.call(encoded.v, "__proto__")) process.exit(3);
+const decoded = dec(encoded);
+if (Object.getPrototypeOf(decoded) !== null) process.exit(4);
+if (!Object.prototype.hasOwnProperty.call(decoded, "__proto__")) process.exit(5);
+if (Object.prototype.polluted !== undefined) process.exit(6);
+if (safeMemberName("__proto__")) process.exit(7);
+if (safeMemberName("x".repeat(257))) process.exit(8);
+"""
+        subprocess.check_call(["node", "-e", script, helper])
+
+    @unittest.skipUnless(shutil.which("node"), "node tidak tersedia")
+    def test_javascript_policy_normalizes_node_builtin_subpaths(self):
+        for mod in ("fs/promises", "node:fs/promises", "inspector/promises",
+                    "node:module", "node:process", "dgram", "dns", "tls", "wasi"):
+            with self.subTest(module=mod):
+                self.assertFalse(Policy().check_bridge("js", mod))
+        self.assertTrue(Policy(allow=["js:fs/promises"]).check_bridge("js", "fs/promises"))
+
+    @unittest.skipUnless(shutil.which("node"), "node tidak tersedia")
+    def test_javascript_protocol_recovers_after_malformed_requests(self):
+        helper = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "..", "src", "qich", "bridge", "js_helper.js"
+        ))
+        valid = json.dumps({"rid": 7, "op": "import", "lib": "path"})
+        proc = subprocess.run(
+            ["node", helper],
+            input='null\n{"rid":1\n' + valid + '\n',
+            capture_output=True, text=True, timeout=10
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        responses = [json.loads(line) for line in proc.stdout.splitlines()]
+        self.assertEqual(len(responses), 3)
+        self.assertFalse(responses[0]["ok"])
+        self.assertFalse(responses[1]["ok"])
+        self.assertEqual(responses[2]["rid"], 7)
+        self.assertTrue(responses[2]["ok"])
+
+    @unittest.skipUnless(shutil.which("node"), "node tidak tersedia")
+    def test_javascript_protocol_bounds_request_size_and_continues(self):
+        helper = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "..", "src", "qich", "bridge", "js_helper.js"
+        ))
+        valid = json.dumps({"rid": 8, "op": "import", "lib": "path"})
+        oversized = "x" * (1024 * 1024 + 1)
+        proc = subprocess.run(
+            ["node", helper],
+            input=oversized + "\n" + valid + "\n",
+            capture_output=True, text=True, timeout=15
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        responses = [json.loads(line) for line in proc.stdout.splitlines()]
+        self.assertEqual(len(responses), 2)
+        self.assertFalse(responses[0]["ok"])
+        self.assertEqual(responses[1]["rid"], 8)
+        self.assertTrue(responses[1]["ok"])
+
+    @unittest.skipUnless(shutil.which("node"), "node tidak tersedia")
+    def test_javascript_handle_table_and_cyclic_values_are_bounded(self):
+        helper = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "..", "src", "qich", "bridge", "js_helper.js"
+        ))
+        script = r"""
+const { enc, MAX_HANDLES } = require(process.argv[1]);
+const cycle = []; cycle.push(cycle);
+if (typeof JSON.stringify(enc(cycle)) !== "string") process.exit(2);
+for (let i = 0; i < MAX_HANDLES - 1; i++) enc(() => {});
+try {
+  enc(() => {});
+  process.exit(3);
+} catch (e) {
+  if (!String(e.message).includes("batas handle")) process.exit(4);
+}
+"""
+        subprocess.check_call(["node", "-e", script, helper])
+
+    @unittest.skipUnless(shutil.which("node"), "node tidak tersedia")
     def test_javascript_errors_and_isolation(self):
-        out = run('use js:fs\ntry { fs.readFileSync("/tidak/ada") } catch e { print(e.kind) }', Policy())
-        self.assertEqual(out.strip(), "ForeignError")
-        with self.assertRaises(QichError): run("use js:child_process")
-        with self.assertRaises(QichError): run("use js:vm")
+        # Bridge Node bukan sandbox OS. Modul sensitif diblokir pada jalur import,
+        # tetapi kode pihak ketiga yang dijalankan Node tetap tidak terisolasi OS.
+        for mod in ("fs", "node:fs", "fs/promises", "node:fs/promises",
+                    "http", "https", "net", "module", "os", "worker_threads",
+                    "child_process", "vm", "process", "node:process"):
+            with self.assertRaises(QichError, msg=mod):
+                run(f"use js:{mod}")
 
     def test_c(self):
         out = run('use c:m\nuse c:c\nlet cos = m.fn("cos", ["f64"], "f64")\nlet strlen = c.fn("strlen", ["str"], "usize")\nprint(cos(0.0), strlen("héllo"))')

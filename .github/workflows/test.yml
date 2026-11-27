@@ -17,27 +17,54 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [test_language.py, test_bridge.py, test_packages.py, test_security.py, test_chyb_cli.py]
+        suite: [test_language.py, test_bridge.py, test_packages.py, test_security.py, test_security_regressions.py, test_qvm.py, test_qvm_differential.py, test_qvm_bootstrap_source.py, test_qvm_native_seed.py, test_chyb_cli.py]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
+      - name: Install native bootstrap seed build dependencies
+        if: matrix.suite == 'test_qvm_native_seed.py'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev libjson-c-dev
       - name: Run ${{ matrix.suite }}
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -p '${{ matrix.suite }}'
+
+  native-sanitizers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Install native bootstrap seed build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev libjson-c-dev
+      - name: Run native seed suite with AddressSanitizer and UndefinedBehaviorSanitizer
+        env:
+          PYTHONPATH: src
+          QICH_NATIVE_SANITIZERS: address,undefined
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1:exitcode=86
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1:exitcode=86
+        run: python -m unittest discover -s tests -p 'test_qvm_native_seed.py'
 
   qich-language-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Run Qich .qh tests
@@ -50,9 +77,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Check Python syntax
@@ -69,6 +96,10 @@ jobs:
           qh bridges
       - name: Benchmark interpreter smoke test
         run: python benchmarks/bench_runtime.py --iterations 10000 --repeat 3
+      - name: Benchmark QVM compiler smoke test
+        env:
+          PYTHONPATH: src
+        run: python benchmarks/bench_qvm.py --constants 1000 --repeat 3
       - name: Create and run a fresh project
         run: |
           qh new ci-smoke
